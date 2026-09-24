@@ -1,13 +1,18 @@
 {
   "expo": {
-    "name": "opspro-picker-app",
+    "name": "OpsPro Picker",
     "slug": "opspro-picker-app",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": "opspro-picker",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "ae.opspro.picker",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -18,8 +23,32 @@
       },
       "predictiveBackGestureEnabled": false
     },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Use Face ID to approve your OpsPro clock-in or clock-out."
+        }
+      ],
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": "Use Face ID to unlock this phone's OpsPro device key."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-secure-store"
+    ]
   }
 }

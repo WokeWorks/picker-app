@@ -15,6 +15,7 @@
       }
     },
     "android": {
+      "package": "ae.opspro.picker",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -37,6 +38,12 @@
           "configureAndroidBackup": true,
           "faceIDPermission": "Use Face ID to unlock this phone's OpsPro device key."
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow OpsPro Picker to verify that you are at your rostered store when you clock in or out."
+        }
       ]
     ],
     "experiments": {
@@ -44,11 +51,6 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    },
-    "plugins": [
-      "expo-router",
-      "expo-status-bar",
-      "expo-secure-store"
-    ]
+    }
   }
 }

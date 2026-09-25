@@ -38,6 +38,15 @@ npx expo run:ios
 
 Use a real device and a development build for biometric testing. iOS Face ID is not available in Expo Go.
 
+Set these build-time values before producing the Android development build:
+
+```sh
+EXPO_PUBLIC_API_BASE_URL=https://your-backend.example
+EXPO_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER=123456789012
+```
+
+Android integrity requires a Play-distributed build and the matching Play Integrity configuration. iOS enrollment remains fail-closed until the App Attest server verifier ships.
+
 ## Checks
 
 ```sh

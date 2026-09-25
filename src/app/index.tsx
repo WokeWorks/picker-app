@@ -9,8 +9,10 @@ import {
   View,
 } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
+import * as SecureStore from 'expo-secure-store';
 
 import { C } from '@/theme';
+import { DEVICE_ID_KEY } from '@/native-api';
 
 type DeviceCheck = 'checking' | 'ready' | 'weak' | 'unavailable';
 
@@ -21,6 +23,11 @@ export default function HomeScreen() {
     let mounted = true;
 
     async function checkDevice() {
+      const enrolledDevice = await SecureStore.getItemAsync(DEVICE_ID_KEY);
+      if (enrolledDevice) {
+        router.replace('/clock');
+        return;
+      }
       const [hardware, enrolled, level] = await Promise.all([
         LocalAuthentication.hasHardwareAsync(),
         LocalAuthentication.isEnrolledAsync(),

@@ -13,8 +13,12 @@ import {
   View,
 } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
+import * as AppIntegrity from '@expo/app-integrity';
+import * as Crypto from 'expo-crypto';
+import * as SecureStore from 'expo-secure-store';
 
 import { C } from '@/theme';
+import { apiPost, DEVICE_ID_KEY, encodeAndroidEnrollmentPayload, GOOGLE_CLOUD_PROJECT_NUMBER, INSTALL_SECRET_KEY, normalizeEnrollmentCode, sha256 } from '@/native-api';
 
 export default function EnrollScreen() {
   const [code, setCode] = useState('');
@@ -32,10 +36,25 @@ export default function EnrollScreen() {
       });
 
       if (!result.success) return;
-      Alert.alert(
-        'Phone check passed',
-        'Server enrollment is intentionally locked until the backend enrollment endpoint is deployed.',
-      );
+      if (Platform.OS !== 'android') throw new Error('iOS enrollment is not available yet.');
+      if (!GOOGLE_CLOUD_PROJECT_NUMBER) throw new Error('Play Integrity project is not configured in this build.');
+
+      const installSecret = `${Crypto.randomUUID()}${Crypto.randomUUID()}`;
+      const deviceLabel = 'Android picker phone';
+      const codeSha256 = await sha256(normalizeEnrollmentCode(code));
+      const installIdHash = await sha256(installSecret);
+      const proofPayload = encodeAndroidEnrollmentPayload({ codeSha256, installIdHash, deviceLabel });
+      const requestHash = await sha256(proofPayload);
+      await AppIntegrity.prepareIntegrityTokenProviderAsync(GOOGLE_CLOUD_PROJECT_NUMBER);
+      const integrityToken = await AppIntegrity.requestIntegrityCheckAsync(requestHash);
+      const enrolled = await apiPost<{ device_id: string }>('/api/mobile/enroll', {
+        code, platform: 'android', install_secret: installSecret, device_label: deviceLabel, integrity_token: integrityToken,
+      });
+      await SecureStore.setItemAsync(INSTALL_SECRET_KEY, installSecret, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
+      await SecureStore.setItemAsync(DEVICE_ID_KEY, enrolled.device_id, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
+      router.replace('/clock');
+    } catch (error) {
+      Alert.alert('Setup failed', error instanceof Error ? error.message : 'Please try again.');
     } finally {
       setChecking(false);
     }
@@ -52,14 +71,14 @@ export default function EnrollScreen() {
         <Text style={styles.title}>Enter your setup code.</Text>
         <Text style={styles.copy}>Your supervisor creates this one-time code. It links this phone to your picker profile.</Text>
 
-        <Text style={styles.label}>6-DIGIT SETUP CODE</Text>
+        <Text style={styles.label}>ONE-TIME SETUP CODE</Text>
         <TextInput
-          accessibilityLabel="Six digit setup code"
+          accessibilityLabel="One-time setup code"
           autoFocus
-          keyboardType="number-pad"
-          maxLength={6}
-          onChangeText={(value) => setCode(value.replace(/\D/g, ''))}
-          placeholder="000 000"
+          autoCapitalize="characters"
+          maxLength={12}
+          onChangeText={(value) => setCode(value.toUpperCase())}
+          placeholder="OP-XXXX-XXXX"
           placeholderTextColor="#9AA6A4"
           style={styles.input}
           value={code}
@@ -73,13 +92,13 @@ export default function EnrollScreen() {
         <View style={styles.footer}>
           <Pressable
             accessibilityRole="button"
-            disabled={code.length !== 6 || checking}
+            disabled={normalizeEnrollmentCode(code).length !== 10 || checking}
             onPress={verifyBiometric}
-            style={({ pressed }) => [styles.primary, code.length !== 6 && styles.disabled, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.primary, normalizeEnrollmentCode(code).length !== 10 && styles.disabled, pressed && styles.pressed]}
           >
             {checking ? <ActivityIndicator color={C.ink} /> : <Text style={styles.primaryText}>Check biometrics</Text>}
           </Pressable>
-          <Text style={styles.locked}>Enrollment submission will activate with the backend release.</Text>
+          <Text style={styles.locked}>The code expires after 15 minutes and works once.</Text>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

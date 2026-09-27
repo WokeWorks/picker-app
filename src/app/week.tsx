@@ -62,6 +62,8 @@ export default function WeekScreen() {
   useEffect(() => { load(); }, [load]);
 
   const shifts = week?.days.filter((d) => d.status === 'scheduled').length ?? 0;
+  // Next week has no "worked so far": two stats split the box in half.
+  const statWidth = which === 'this' ? '33.333%' : '50%';
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -88,9 +90,9 @@ export default function WeekScreen() {
           <>
             <Text style={styles.range}>{weekRange(week.days[0].date, week.days[6].date)}</Text>
             <View style={styles.summaryRow}>
-              <Stat first value={String(shifts)} label={shifts === 1 ? 'shift' : 'shifts'} />
-              <Stat value={hoursLabel(week.rosteredHours)} label="rostered" />
-              {which === 'this' && <Stat value={hoursLabel(week.workedHours)} label="worked so far" accent />}
+              <Stat first width={statWidth} value={String(shifts)} label={shifts === 1 ? 'shift' : 'shifts'} />
+              <Stat width={statWidth} value={hoursLabel(week.rosteredHours)} label="rostered" />
+              {which === 'this' && <Stat width={statWidth} value={hoursLabel(week.workedHours)} label="worked so far" accent />}
             </View>
 
             <View style={styles.days}>
@@ -107,9 +109,9 @@ export default function WeekScreen() {
   );
 }
 
-function Stat({ value, label, accent, first }: { value: string; label: string; accent?: boolean; first?: boolean }) {
+function Stat({ value, label, accent, first, width }: { value: string; label: string; accent?: boolean; first?: boolean; width: '33.333%' | '50%' }) {
   return (
-    <View style={[styles.stat, !first && styles.statDivided]}>
+    <View style={[styles.stat, { width }, !first && styles.statDivided]}>
       <Text style={[styles.statValue, accent && { color: C.brand }]}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
@@ -200,7 +202,7 @@ const styles = StyleSheet.create({
   error: { color: C.danger, fontSize: 15, marginTop: 24, textAlign: 'center' },
   range: { color: C.muted, fontSize: 14, fontWeight: '600', marginTop: 20 },
   summaryRow: { flexDirection: 'row', marginTop: 8, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, borderRadius: 14 },
-  stat: { width: '33.333%', paddingVertical: 12, paddingHorizontal: 14 },
+  stat: { paddingVertical: 12, paddingHorizontal: 14 },
   statDivided: { borderLeftWidth: 1, borderLeftColor: C.line },
   statValue: { color: C.ink, fontSize: 22, fontWeight: '800' },
   statLabel: { color: C.muted, fontSize: 13 },

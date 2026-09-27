@@ -87,6 +87,11 @@ export default function HomeScreen() {
             <Icon name="arrowRight" size={22} color={isReady ? C.onBrand : C.faint} strokeWidth={2} />
           </Pressable>
           <Text style={styles.help}>Need help? Ask your supervisor.</Text>
+          {__DEV__ && (
+            <Pressable accessibilityRole="button" onPress={() => router.push('/clock?demo=1')} style={styles.devLink}>
+              <Text style={styles.devLinkText}>Preview the clock-in screen (test builds only)</Text>
+            </Pressable>
+          )}
         </View>
       </View>
     </SafeAreaView>
@@ -147,4 +152,6 @@ const styles = StyleSheet.create({
   primaryText: { color: C.onBrand, fontSize: 17, fontWeight: '700' },
   primaryTextDisabled: { color: C.faint },
   help: { color: C.muted, textAlign: 'center', fontSize: 13, marginTop: 12 },
+  devLink: { alignSelf: 'center', marginTop: 10, paddingVertical: 6, paddingHorizontal: 10 },
+  devLinkText: { color: C.brand, fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
 });

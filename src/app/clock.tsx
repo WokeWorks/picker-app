@@ -1,3 +1,4 @@
+import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -6,6 +7,7 @@ import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 
 import { Brand } from '@/components/Brand';
+import { DEMO_STATES, demoSession, type DemoState } from '@/demo';
 import { Icon } from '@/components/Icon';
 import { requestIntegrityToken } from '@/integrity';
 import { friendlyError } from '@/messages';
@@ -28,12 +30,17 @@ export default function ClockScreen() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  // Development-only preview with sample data (src/demo.ts).
+  const params = useLocalSearchParams<{ demo?: string }>();
+  const demo = __DEV__ && params.demo === '1';
+  const [demoState, setDemoState] = useState<DemoState>('before');
 
   const refresh = useCallback(async () => {
+    if (demo) { setSession(demoSession(demoState)); return; }
     const installSecret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
     if (!installSecret) throw new Error('device_inactive');
     setSession(await apiPost<Session>('/api/mobile/session', { install_secret: installSecret }));
-  }, []);
+  }, [demo, demoState]);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -45,6 +52,18 @@ export default function ClockScreen() {
   async function punch() {
     if (!session || session.locations.length !== 1) return;
     const clockingIn = session.action === 'clock_in';
+    if (demo) {
+      const biometric = await LocalAuthentication.authenticateAsync({
+        promptMessage: clockingIn ? 'Approve clock-in' : 'Approve clock-out',
+        promptSubtitle: session.locations[0].name,
+        disableDeviceFallback: true,
+        requireConfirmation: true,
+      });
+      if (!biometric.success) return;
+      setDemoState(clockingIn ? 'on' : 'before');
+      Alert.alert(clockingIn ? 'Clocked in' : 'Clocked out', `Recorded at ${gstTime(new Date().toISOString())}. (Preview: nothing was saved.)`);
+      return;
+    }
     setBusy(true);
     try {
       const installSecret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
@@ -100,6 +119,19 @@ export default function ClockScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} tintColor={C.brand} colors={[C.brand]} />}
       >
         <Brand />
+
+        {demo && (
+          <View style={styles.demoBar}>
+            <Text style={styles.demoLabel}>Preview with sample data</Text>
+            <View style={styles.demoChips}>
+              {DEMO_STATES.map((s) => (
+                <Pressable key={s.id} onPress={() => setDemoState(s.id)} style={[styles.demoChip, demoState === s.id && styles.demoChipOn]}>
+                  <Text style={[styles.demoChipText, demoState === s.id && styles.demoChipTextOn]}>{s.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
 
         <Text style={styles.hello}>Hi {firstName}</Text>
         <View style={[styles.statePill, onShift && styles.statePillOn]}>
@@ -192,6 +224,13 @@ const styles = StyleSheet.create({
   punchMainOut: { color: C.brand },
   punchMainDisabled: { color: C.faint },
   punchHint: { color: C.muted, fontSize: 14, marginTop: 16 },
+  demoBar: { marginTop: 16, borderWidth: 1, borderStyle: 'dashed', borderColor: C.lineStrong, borderRadius: 12, padding: 10 },
+  demoLabel: { color: C.muted, fontSize: 12, fontWeight: '600', marginBottom: 8 },
+  demoChips: { flexDirection: 'row', gap: 6 },
+  demoChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 99, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line },
+  demoChipOn: { backgroundColor: C.ink, borderColor: C.ink },
+  demoChipText: { color: C.inkMid, fontSize: 12, fontWeight: '600' },
+  demoChipTextOn: { color: C.paper },
   checks: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
   checksText: { color: C.muted, fontSize: 13 },
 });

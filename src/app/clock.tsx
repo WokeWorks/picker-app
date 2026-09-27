@@ -239,10 +239,6 @@ export default function ClockScreen() {
           <Icon name="arrowRight" size={18} color={C.muted} />
         </Pressable>
 
-        <View style={styles.checks}>
-          <Icon name="checkCircle" size={16} color={C.muted} />
-          <Text style={styles.checksText}>Your location and roster are checked with every punch</Text>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -300,9 +296,7 @@ const styles = StyleSheet.create({
   demoChipTextOn: { color: C.paper },
   weekCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.paper,
-    borderWidth: 1, borderColor: C.line, borderRadius: 14, padding: 16, marginBottom: 16,
+    borderWidth: 1, borderColor: C.line, borderRadius: 14, padding: 16, 
   },
   weekCardText: { flex: 1, color: C.ink, fontSize: 15, fontWeight: '600' },
-  checks: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
-  checksText: { color: C.muted, fontSize: 13 },
 });

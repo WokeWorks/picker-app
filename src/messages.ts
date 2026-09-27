@@ -25,6 +25,7 @@ const MESSAGES: Record<string, string> = {
   expired_code: 'That setup code has expired. Ask your admin for a new one.',
   device_already_registered: 'This phone is already registered.',
   replacement_device_changed: 'Your registered phone changed while setting up. Ask your admin for a new code.',
+  break_already_taken: "You've already taken your break this shift.",
   punch_rejected: 'The punch was not accepted. Try again, or ask your supervisor.',
 };
 

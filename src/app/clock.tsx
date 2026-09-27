@@ -38,6 +38,11 @@ function fmtTime(hhmm: string) {
   return `${h12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
+// A punch time in Dubai time, 12-hour to match the store card ("4:14 PM").
+function clockTime(iso: string) {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dubai' });
+}
+
 // Dubai time, 24h ("13:02"), whatever timezone the phone is set to.
 function gstTime(iso: string) {
   return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' });
@@ -152,14 +157,16 @@ export default function ClockScreen() {
         )}
 
         <Text style={styles.hello}>Hi {firstName}</Text>
-        <View style={[styles.statePill, onShift && styles.statePillOn]}>
-          <View style={[styles.stateDot, onShift && styles.stateDotOn]} />
-          <Text style={[styles.stateText, onShift && styles.stateTextOn]}>
-            {onShift
-              ? session?.clocked_in_at ? `Clocked in since ${gstTime(session.clocked_in_at)}` : 'Clocked in'
-              : 'Not clocked in'}
-          </Text>
-        </View>
+        {/* Only while on shift: it carries the one fact shown nowhere else, the
+            clock-in time. Before a shift the Clock in button says it all. */}
+        {onShift && (
+          <View style={[styles.statePill, styles.statePillOn]}>
+            <View style={[styles.stateDot, styles.stateDotOn]} />
+            <Text style={[styles.stateText, styles.stateTextOn]}>
+              {session?.clocked_in_at ? `Clocked in since ${clockTime(session.clocked_in_at)}` : 'Clocked in'}
+            </Text>
+          </View>
+        )}
 
         <View style={styles.store}>
           <View style={styles.storeTop}>

@@ -159,7 +159,19 @@ export default function ClockScreen() {
         contentContainerStyle={styles.page}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} tintColor={C.brand} colors={[C.brand]} />}
       >
-        <Brand onLongPress={demo ? () => setDemoBar(true) : undefined} />
+        <View style={styles.header}>
+          <Brand onLongPress={demo ? () => setDemoBar(true) : undefined} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Your shift schedule"
+            onPress={() => router.push(demo ? '/week?demo=1' : '/week')}
+            style={({ pressed }) => [styles.scheduleBtn, pressed && { backgroundColor: C.pressed }]}
+            hitSlop={6}
+          >
+            <Icon name="calendar" size={17} color={C.brand} strokeWidth={2} />
+            <Text style={styles.scheduleText}>Schedule</Text>
+          </Pressable>
+        </View>
 
         {demo && demoBar && (
           <View style={styles.demoBar}>
@@ -238,8 +250,8 @@ export default function ClockScreen() {
                 onPress={() => setBreak('end')}
                 style={({ pressed }) => [styles.punch, styles.punchBreak, pressed && styles.punchBreakPressed]}
               >
-                {busy ? <ActivityIndicator color={C.accentYellow} size="large" /> : <>
-                  <Icon name="tea" size={42} color={C.accentYellow} strokeWidth={1.6} />
+                {busy ? <ActivityIndicator color={C.onOrange} size="large" /> : <>
+                  <Icon name="tea" size={42} color={C.onOrange} strokeWidth={1.6} />
                   <Text style={[styles.punchMain, styles.punchMainBreak]}>End break</Text>
                 </>}
               </Pressable>
@@ -271,9 +283,9 @@ export default function ClockScreen() {
                 <Text style={styles.secondaryText}>Clock out instead</Text>
               </Pressable>
             ) : onShift && !breakUsed ? (
-              <Pressable accessibilityRole="button" onPress={confirmStartBreak} disabled={busy} style={({ pressed }) => [styles.breakBtn, pressed && { backgroundColor: C.pressed }]}>
-                <Icon name="tea" size={19} color={C.ink} />
-                <Text style={styles.breakBtnText}>Start 1-hour break</Text>
+              <Pressable accessibilityRole="button" onPress={confirmStartBreak} disabled={busy} style={({ pressed }) => [styles.breakBtn, pressed && { backgroundColor: C.orangeDeep }]}>
+                <Icon name="tea" size={19} color={C.onOrange} />
+                <Text style={styles.breakBtnText}>Take a break</Text>
               </Pressable>
             ) : onShift ? (
               <Text style={styles.punchHint}>Break taken</Text>
@@ -283,15 +295,6 @@ export default function ClockScreen() {
           </View>
         )}
 
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => router.push(demo ? '/week?demo=1' : '/week')}
-          style={({ pressed }) => [styles.weekCard, (done || (!onShift && !location)) && styles.gap, pressed && { backgroundColor: C.pressed }]}
-        >
-          <Icon name="clock" size={20} color={C.brand} />
-          <Text style={styles.weekCardText}>Your shift schedule</Text>
-          <Icon name="arrowRight" size={18} color={C.muted} />
-        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
@@ -317,19 +320,19 @@ const styles = StyleSheet.create({
   punchPressed: { backgroundColor: C.brandDeep },
   punchOut: { backgroundColor: C.paper, borderColor: C.brand, borderWidth: 3 },
   punchOutPressed: { backgroundColor: C.brandTint },
-  punchBreak: { backgroundColor: C.ink, borderColor: C.pressed },
-  punchBreakPressed: { backgroundColor: '#3A3331' },
+  punchBreak: { backgroundColor: C.orange, borderColor: C.orangeTint },
+  punchBreakPressed: { backgroundColor: C.orangeDeep },
   punchDisabled: { backgroundColor: C.line, borderColor: C.pressed, borderWidth: 8 },
   punchMain: { color: C.onBrand, fontSize: 26, fontWeight: '800' },
   punchMainOut: { color: C.brand },
-  punchMainBreak: { color: C.paper },
+  punchMainBreak: { color: C.onOrange },
   punchMainDisabled: { color: C.faint },
   punchHint: { color: C.muted, fontSize: 14, marginTop: 16 },
   breakBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 18,
-    paddingHorizontal: 18, paddingVertical: 12, borderRadius: 99, borderWidth: 1, borderColor: C.lineStrong, backgroundColor: C.paper,
+    paddingHorizontal: 20, paddingVertical: 12, borderRadius: 99, backgroundColor: C.orange,
   },
-  breakBtnText: { color: C.ink, fontSize: 15, fontWeight: '700' },
+  breakBtnText: { color: C.onOrange, fontSize: 15, fontWeight: '700' },
   secondary: { marginTop: 18, paddingVertical: 8, paddingHorizontal: 12 },
   secondaryText: { color: C.brand, fontSize: 15, fontWeight: '700', textDecorationLine: 'underline' },
   demoBar: { marginTop: 12, borderWidth: 1, borderStyle: 'dashed', borderColor: C.lineStrong, borderRadius: 12, padding: 10 },
@@ -342,9 +345,10 @@ const styles = StyleSheet.create({
   demoChipText: { color: C.inkMid, fontSize: 12, fontWeight: '600' },
   demoChipTextOn: { color: C.paper },
   demoTip: { color: C.faint, fontSize: 11, marginTop: 8 },
-  weekCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.paper,
-    borderWidth: 1, borderColor: C.line, borderRadius: 14, padding: 16,
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  scheduleBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8,
+    borderRadius: 99, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line,
   },
-  weekCardText: { flex: 1, color: C.ink, fontSize: 15, fontWeight: '600' },
+  scheduleText: { color: C.brand, fontSize: 14, fontWeight: '700' },
 });

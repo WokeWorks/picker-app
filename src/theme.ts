@@ -28,6 +28,13 @@ export const C = {
   amber: '#B45309', amberBg: '#FEF3C7',
   danger: '#DC2626', dangerBg: '#FEE2E2',
 
+  // GrowHub orange (growhub.ae). Too light for white text (2.8:1), so it is
+  // always paired with dark ink (5.9:1). Used for breaks.
+  orange: '#F47824',
+  orangeDeep: '#CB5A2A',
+  orangeTint: '#FFF1E8',
+  onOrange: '#241F1E',
+
   accentYellow: '#EFE565',
   accentPink: '#F16885',
 } as const;

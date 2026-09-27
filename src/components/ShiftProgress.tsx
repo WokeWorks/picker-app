@@ -53,13 +53,13 @@ export function ShiftProgress({ clockedInAt, shiftStart, shiftEnd, breakStartedA
     return (
       <View style={[styles.panel, styles.breakPanel]} accessibilityLabel={`On break, ${duration(left)} left`}>
         <View style={styles.labelRow}>
-          <View style={[styles.liveDot, { backgroundColor: C.accentYellow }]} />
-          <Text style={styles.label}>On break</Text>
+          <View style={[styles.liveDot, { backgroundColor: C.onOrange }]} />
+          <Text style={[styles.label, styles.onOrange]}>On break</Text>
         </View>
-        <Text style={styles.big}>{duration(left)} <Text style={styles.bigUnit}>left</Text></Text>
-        <Text style={styles.meta}>Back by {clockTime(endMs)}  ·  Started {clockTime(startMs)}</Text>
-        <View style={styles.track}>
-          <View style={[styles.fill, { width: `${Math.max(2, Math.min(1, (now - startMs) / BREAK_MS) * 100)}%`, backgroundColor: C.accentYellow }]} />
+        <Text style={[styles.big, styles.onOrange]}>{duration(left)} <Text style={styles.bigUnit}>left</Text></Text>
+        <Text style={[styles.meta, styles.onOrange]}>Back by {clockTime(endMs)}  ·  Started {clockTime(startMs)}</Text>
+        <View style={[styles.track, { backgroundColor: 'rgba(36,31,30,0.18)' }]}>
+          <View style={[styles.fill, { width: `${Math.max(2, Math.min(1, (now - startMs) / BREAK_MS) * 100)}%`, backgroundColor: C.onOrange }]} />
         </View>
       </View>
     );
@@ -94,7 +94,8 @@ export function ShiftProgress({ clockedInAt, shiftStart, shiftEnd, breakStartedA
 
 const styles = StyleSheet.create({
   panel: { marginTop: 16, backgroundColor: C.brand, borderRadius: 16, padding: 18 },
-  breakPanel: { backgroundColor: C.ink },
+  breakPanel: { backgroundColor: C.orange },
+  onOrange: { color: C.onOrange },
   labelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#6EE7A8' },
   label: { color: C.onBrandMuted, fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },

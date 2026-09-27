@@ -306,7 +306,9 @@ const styles = StyleSheet.create({
   page: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 16, paddingBottom: 24 },
   hello: { color: C.ink, fontSize: 32, fontWeight: '800', letterSpacing: -0.8, marginTop: 28 },
   gap: { marginTop: 16 },
-  donePanel: { marginTop: 16, backgroundColor: C.brandTint, borderWidth: 1, borderColor: C.brandBorder, borderRadius: 16, padding: 18 },
+  // GrowHub yellow with brand-green type (6.4:1): green = on shift, orange =
+  // on break, yellow = done.
+  donePanel: { marginTop: 16, backgroundColor: C.accentYellow, borderRadius: 16, padding: 18 },
   doneHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   doneLabel: { color: C.brand, fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
   doneBig: { color: C.ink, fontSize: 40, fontWeight: '800', letterSpacing: -1, marginTop: 4 },

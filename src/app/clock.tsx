@@ -20,8 +20,23 @@ type Session = {
   employee: { id: string; name: string };
   action: 'clock_in' | 'clock_out';
   clocked_in_at: string | null;
-  locations: Array<{ id: string; name: string; shift_start: string; shift_end: string; lat: number | null; lng: number | null }>;
+  locations: Array<{ id: string; name: string; shift_start: string; shift_end: string; lat: number | null; lng: number | null; chain?: string | null; area?: string | null }>;
 };
+
+// "Carrefour · Mall of the Emirates" -> chain + area. The server sends them
+// separately; the split is the fallback for a store with no chain/area set.
+function storeParts(l: { name: string; chain?: string | null; area?: string | null }) {
+  if (l.chain) return { chain: l.chain, area: l.area ?? null };
+  const [chain, ...rest] = l.name.split(' · ');
+  return { chain, area: rest.join(' · ') || null };
+}
+
+// Roster time "13:00" -> "1 PM", "13:30" -> "1:30 PM".
+function fmtTime(hhmm: string) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h < 12 ? 'AM' : 'PM'}`;
+}
 
 // Dubai time, 24h ("13:02"), whatever timezone the phone is set to.
 function gstTime(iso: string) {
@@ -146,28 +161,42 @@ export default function ClockScreen() {
           </Text>
         </View>
 
-        <Pressable
-          accessibilityRole={hasPin(location) ? 'link' : undefined}
-          accessibilityLabel={hasPin(location) ? `Directions to ${location.name}` : undefined}
-          disabled={!hasPin(location)}
-          onPress={() => location && openDirections(location)}
-          style={({ pressed }) => [styles.store, pressed && { backgroundColor: C.pressed }]}
-        >
-          <Icon name="pin" size={22} color={location ? C.brand : C.faint} />
-          <View style={styles.storeCopy}>
-            <Text style={styles.storeLabel}>{onShift ? 'Your store' : "Today's store"}</Text>
-            <Text style={styles.storeName}>{location?.name || 'No shift right now'}</Text>
-            {location
-              ? <View style={styles.shiftRow}><Icon name="clock" size={15} color={C.muted} /><Text style={styles.shiftTime}>{location.shift_start} – {location.shift_end}</Text></View>
-              : <Text style={styles.shiftTime}>Clock-in opens 90 minutes before your rostered start.</Text>}
+        <View style={styles.store}>
+          <View style={styles.storeTop}>
+            <View style={styles.storeCopy}>
+              <Text style={styles.storeLabel}>{onShift ? 'Your store' : "Today's store"}</Text>
+              {location ? (
+                <>
+                  <Text style={styles.storeChain}>{storeParts(location).chain}</Text>
+                  {storeParts(location).area && <Text style={styles.storeArea}>{storeParts(location).area}</Text>}
+                </>
+              ) : (
+                <>
+                  <Text style={styles.storeChain}>No shift right now</Text>
+                  <Text style={styles.storeNote}>Clock-in opens 90 minutes before your rostered start.</Text>
+                </>
+              )}
+            </View>
+            {location && (
+              <View style={styles.times} accessibilityLabel={`${fmtTime(location.shift_start)} to ${fmtTime(location.shift_end)}`}>
+                <Text style={styles.timeBig}>{fmtTime(location.shift_start)}</Text>
+                <Text style={styles.timeTo}>to</Text>
+                <Text style={styles.timeBig}>{fmtTime(location.shift_end)}</Text>
+              </View>
+            )}
           </View>
           {hasPin(location) && (
-            <View style={styles.mapHint}>
-              <Text style={styles.mapHintText}>Map</Text>
-              <Icon name="arrowRight" size={16} color={C.brand} strokeWidth={2} />
-            </View>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel={`Open ${location.name} in Maps`}
+              onPress={() => openDirections(location)}
+              style={({ pressed }) => [styles.mapCta, pressed && { backgroundColor: C.brandTint }]}
+            >
+              <Icon name="pin" size={18} color={C.brand} strokeWidth={2} />
+              <Text style={styles.mapCtaText}>Open in Maps</Text>
+            </Pressable>
           )}
-        </Pressable>
+        </View>
 
         <View style={styles.actionZone}>
           <Pressable
@@ -199,7 +228,7 @@ export default function ClockScreen() {
           style={({ pressed }) => [styles.weekCard, pressed && { backgroundColor: C.pressed }]}
         >
           <Icon name="clock" size={20} color={C.brand} />
-          <Text style={styles.weekCardText}>Your shifts this week and next</Text>
+          <Text style={styles.weekCardText}>Your shift schedule</Text>
           <Icon name="arrowRight" size={18} color={C.muted} />
         </Pressable>
 
@@ -226,17 +255,21 @@ const styles = StyleSheet.create({
   stateDotOn: { backgroundColor: C.green },
   stateText: { color: C.inkMid, fontSize: 14, fontWeight: '600' },
   stateTextOn: { color: C.green },
-  store: {
-    flexDirection: 'row', gap: 12, marginTop: 24, backgroundColor: C.paper,
-    borderWidth: 1, borderColor: C.line, borderRadius: 16, padding: 16,
-  },
+  store: { marginTop: 24, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, borderRadius: 16, overflow: 'hidden' },
+  storeTop: { flexDirection: 'row', gap: 12, padding: 16 },
   storeCopy: { flex: 1 },
-  mapHint: { flexDirection: 'row', alignItems: 'center', gap: 2, alignSelf: 'center' },
-  mapHintText: { color: C.brand, fontSize: 14, fontWeight: '700' },
   storeLabel: { color: C.muted, fontSize: 13, fontWeight: '600' },
-  storeName: { color: C.ink, fontSize: 20, fontWeight: '700', marginTop: 2 },
-  shiftRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
-  shiftTime: { color: C.inkMid, fontSize: 15, marginTop: 2 },
+  storeChain: { color: C.ink, fontSize: 20, fontWeight: '700', marginTop: 4 },
+  storeArea: { color: C.inkMid, fontSize: 18, fontWeight: '500', marginTop: 1 },
+  storeNote: { color: C.inkMid, fontSize: 14, lineHeight: 20, marginTop: 4 },
+  times: { alignItems: 'flex-end', justifyContent: 'center' },
+  timeBig: { color: C.ink, fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },
+  timeTo: { color: C.muted, fontSize: 12, fontWeight: '600', marginVertical: 1 },
+  mapCta: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderTopWidth: 1, borderTopColor: C.line, paddingVertical: 14,
+  },
+  mapCtaText: { color: C.brand, fontSize: 16, fontWeight: '700' },
   actionZone: { flex: 1, minHeight: 300, alignItems: 'center', justifyContent: 'center' },
   punch: {
     width: 220, height: 220, borderRadius: 110, backgroundColor: C.brand,

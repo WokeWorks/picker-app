@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AppIntegrity from '@expo/app-integrity';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 
+import { Brand } from '@/components/Brand';
+import { Icon } from '@/components/Icon';
+import { friendlyError } from '@/messages';
 import { C } from '@/theme';
 import { apiPost, GOOGLE_CLOUD_PROJECT_NUMBER, INSTALL_SECRET_KEY } from '@/native-api';
 
@@ -15,35 +19,45 @@ type Session = {
   locations: Array<{ id: string; name: string; shift_start: string; shift_end: string }>;
 };
 
+// Dubai time, 24h ("13:02"), whatever timezone the phone is set to.
+function gstTime(iso: string) {
+  return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' });
+}
+
 export default function ClockScreen() {
   const [session, setSession] = useState<Session | null>(null);
-  const [busy, setBusy] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     const installSecret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-    if (!installSecret) throw new Error('This phone is not enrolled.');
+    if (!installSecret) throw new Error('device_inactive');
     setSession(await apiPost<Session>('/api/mobile/session', { install_secret: installSecret }));
   }, []);
 
-  useEffect(() => {
-    refresh().catch((error) => Alert.alert('Could not load shift', error.message)).finally(() => setBusy(false));
+  const reload = useCallback(() => {
+    setLoading(true);
+    refresh().catch((error) => Alert.alert('Could not load your shift', friendlyError(error))).finally(() => setLoading(false));
   }, [refresh]);
+
+  useEffect(reload, [reload]);
 
   async function punch() {
     if (!session || session.locations.length !== 1) return;
+    const clockingIn = session.action === 'clock_in';
     setBusy(true);
     try {
-      if (!GOOGLE_CLOUD_PROJECT_NUMBER) throw new Error('Play Integrity project is not configured in this build.');
+      if (!GOOGLE_CLOUD_PROJECT_NUMBER) throw new Error('This build of the app is not configured. Ask your supervisor.');
       const installSecret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-      if (!installSecret) throw new Error('This phone is not enrolled.');
+      if (!installSecret) throw new Error('device_inactive');
       const permission = await Location.requestForegroundPermissionsAsync();
-      if (permission.status !== 'granted') throw new Error('Location permission is required.');
+      if (permission.status !== 'granted') throw new Error('Allow location access in your phone settings, then try again.');
       const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      if (position.mocked === true) throw new Error('Mock location is enabled.');
-      if ((position.coords.accuracy ?? Infinity) > 100) throw new Error('GPS is not accurate enough. Move near the entrance and retry.');
+      if (position.mocked === true) throw new Error('mock_location_detected');
+      if ((position.coords.accuracy ?? Infinity) > 100) throw new Error('poor_gps_accuracy');
 
       const biometric = await LocalAuthentication.authenticateAsync({
-        promptMessage: session.action === 'clock_in' ? 'Approve clock-in' : 'Approve clock-out',
+        promptMessage: clockingIn ? 'Approve clock-in' : 'Approve clock-out',
         promptSubtitle: session.locations[0].name,
         disableDeviceFallback: true,
         biometricsSecurityLevel: 'strong',
@@ -62,59 +76,124 @@ export default function ClockScreen() {
       });
       await AppIntegrity.prepareIntegrityTokenProviderAsync(GOOGLE_CLOUD_PROJECT_NUMBER);
       const integrityToken = await AppIntegrity.requestIntegrityCheckAsync(challenge.request_hash);
-      await apiPost('/api/mobile/punch/commit', { install_secret: installSecret, payload: challenge.payload, integrity_token: integrityToken });
+      const done = await apiPost<{ timestamp: string }>('/api/mobile/punch/commit', { install_secret: installSecret, payload: challenge.payload, integrity_token: integrityToken });
       await refresh();
-      Alert.alert(session.action === 'clock_in' ? 'Clocked in' : 'Clocked out', 'Your punch was verified.');
+      Alert.alert(clockingIn ? 'Clocked in' : 'Clocked out', `Recorded at ${gstTime(done.timestamp)}.`);
     } catch (error) {
-      Alert.alert('Punch failed', error instanceof Error ? error.message : 'Please try again.');
+      Alert.alert(clockingIn ? 'Clock-in failed' : 'Clock-out failed', friendlyError(error));
     } finally {
       setBusy(false);
     }
   }
 
-  if (busy && !session) return <SafeAreaView style={styles.safe}><View style={styles.loading}><ActivityIndicator color={C.tealDark} size="large" /></View></SafeAreaView>;
+  if (loading && !session) {
+    return <SafeAreaView style={styles.safe}><View style={styles.loading}><ActivityIndicator color={C.brand} size="large" /></View></SafeAreaView>;
+  }
 
   const location = session?.locations[0];
+  const onShift = session?.action === 'clock_out';
   const canPunch = !!session && session.locations.length === 1 && !busy;
+  const firstName = session?.employee.name.split(' ')[0] || 'there';
+
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.page}>
-        <View style={styles.topline}><Text style={styles.brand}>OpsPro</Text><Text style={styles.secure}>SECURE DEVICE</Text></View>
-        <Text style={styles.hello}>Hi, {session?.employee.name.split(' ')[0] || 'Picker'}.</Text>
-        <Text style={styles.state}>{session?.action === 'clock_out' ? 'You’re on shift.' : 'Ready for work?'}</Text>
-        <View style={styles.storeBand}>
-          <Text style={styles.storeLabel}>TODAY’S STORE</Text>
-          <Text style={styles.storeName}>{location?.name || 'No open shift right now'}</Text>
-          {location && <Text style={styles.shiftTime}>{location.shift_start} — {location.shift_end}</Text>}
+      <ScrollView
+        contentContainerStyle={styles.page}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} tintColor={C.brand} colors={[C.brand]} />}
+      >
+        <Brand />
+
+        <Text style={styles.hello}>Hi {firstName}</Text>
+        <View style={[styles.statePill, onShift && styles.statePillOn]}>
+          <View style={[styles.stateDot, onShift && styles.stateDotOn]} />
+          <Text style={[styles.stateText, onShift && styles.stateTextOn]}>
+            {onShift
+              ? session?.clocked_in_at ? `Clocked in since ${gstTime(session.clocked_in_at)}` : 'Clocked in'
+              : 'Not clocked in'}
+          </Text>
         </View>
+
+        <View style={styles.store}>
+          <Icon name="pin" size={22} color={location ? C.brand : C.faint} />
+          <View style={styles.storeCopy}>
+            <Text style={styles.storeLabel}>{onShift ? 'Your store' : "Today's store"}</Text>
+            <Text style={styles.storeName}>{location?.name || 'No shift right now'}</Text>
+            {location
+              ? <View style={styles.shiftRow}><Icon name="clock" size={15} color={C.muted} /><Text style={styles.shiftTime}>{location.shift_start} – {location.shift_end}</Text></View>
+              : <Text style={styles.shiftTime}>Clock-in opens 90 minutes before your rostered start.</Text>}
+          </View>
+        </View>
+
         <View style={styles.actionZone}>
-          <Pressable accessibilityRole="button" disabled={!canPunch} onPress={punch}
-            style={({ pressed }) => [styles.punch, !canPunch && styles.punchDisabled, pressed && styles.punchPressed]}>
-            {busy ? <ActivityIndicator color={C.ink} /> : <>
-              <Text style={styles.punchSmall}>BIOMETRIC APPROVAL</Text>
-              <Text style={styles.punchMain}>{session?.action === 'clock_out' ? 'Clock out' : 'Clock in'}</Text>
-              <Text style={styles.punchHint}>Tap, then use fingerprint or face</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={onShift ? 'Clock out' : 'Clock in'}
+            accessibilityState={{ disabled: !canPunch, busy }}
+            disabled={!canPunch}
+            onPress={punch}
+            style={({ pressed }) => [
+              styles.punch,
+              onShift && styles.punchOut,
+              !canPunch && styles.punchDisabled,
+              pressed && canPunch && (onShift ? styles.punchOutPressed : styles.punchPressed),
+            ]}
+          >
+            {busy ? <ActivityIndicator color={onShift ? C.brand : C.onBrand} size="large" /> : <>
+              <Icon name="fingerprint" size={40} color={!canPunch ? C.faint : onShift ? C.brand : C.onBrand} strokeWidth={1.6} />
+              <Text style={[styles.punchMain, onShift && styles.punchMainOut, !canPunch && styles.punchMainDisabled]}>
+                {onShift ? 'Clock out' : 'Clock in'}
+              </Text>
             </>}
           </Pressable>
+          <Text style={styles.punchHint}>Tap, then use your fingerprint or face</Text>
         </View>
-        <View style={styles.trustRow}><Text style={styles.trustDot}>●</Text><Text style={styles.trustText}>Device, location and roster will be verified</Text></View>
-      </View>
+
+        <View style={styles.checks}>
+          <Icon name="checkCircle" size={16} color={C.muted} />
+          <Text style={styles.checksText}>Your location and roster are checked with every punch</Text>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: C.canvas }, loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  page: { flex: 1, paddingHorizontal: 24, paddingTop: 24, paddingBottom: 24 },
-  topline: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, brand: { color: C.ink, fontSize: 20, fontWeight: '900' },
-  secure: { color: C.tealDark, fontSize: 10, fontWeight: '800', letterSpacing: 1.5 }, hello: { color: C.muted, fontSize: 18, marginTop: 54 },
-  state: { color: C.ink, fontSize: 42, lineHeight: 47, fontWeight: '800', letterSpacing: -1.6, marginTop: 5 },
-  storeBand: { marginTop: 34, borderTopWidth: 1, borderBottomWidth: 1, borderColor: C.line, paddingVertical: 20 },
-  storeLabel: { color: C.tealDark, fontSize: 10, fontWeight: '800', letterSpacing: 1.8 }, storeName: { color: C.ink, fontSize: 23, fontWeight: '800', marginTop: 7 },
-  shiftTime: { color: C.muted, fontSize: 15, marginTop: 5 }, actionZone: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  punch: { width: 250, height: 250, borderRadius: 125, backgroundColor: C.teal, alignItems: 'center', justifyContent: 'center', padding: 24, borderWidth: 10, borderColor: C.tealTint },
-  punchDisabled: { backgroundColor: '#CCD6D4', borderColor: '#EEF2F1' }, punchPressed: { transform: [{ scale: 0.97 }] },
-  punchSmall: { color: C.tealDark, fontSize: 10, fontWeight: '900', letterSpacing: 1.4 }, punchMain: { color: C.ink, fontSize: 34, fontWeight: '900', marginTop: 8 },
-  punchHint: { color: C.ink, opacity: 0.7, textAlign: 'center', fontSize: 12, lineHeight: 17, marginTop: 8 },
-  trustRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 }, trustDot: { color: C.tealDark, fontSize: 10 }, trustText: { color: C.muted, fontSize: 12 },
+  safe: { flex: 1, backgroundColor: C.canvas },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  page: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 16, paddingBottom: 24 },
+  hello: { color: C.ink, fontSize: 32, fontWeight: '800', letterSpacing: -0.8, marginTop: 36 },
+  statePill: {
+    alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10,
+    backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, borderRadius: 99, paddingHorizontal: 12, paddingVertical: 6,
+  },
+  statePillOn: { backgroundColor: C.greenBg, borderColor: '#A7E8BF' },
+  stateDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.faint },
+  stateDotOn: { backgroundColor: C.green },
+  stateText: { color: C.inkMid, fontSize: 14, fontWeight: '600' },
+  stateTextOn: { color: C.green },
+  store: {
+    flexDirection: 'row', gap: 12, marginTop: 24, backgroundColor: C.paper,
+    borderWidth: 1, borderColor: C.line, borderRadius: 16, padding: 16,
+  },
+  storeCopy: { flex: 1 },
+  storeLabel: { color: C.muted, fontSize: 13, fontWeight: '600' },
+  storeName: { color: C.ink, fontSize: 20, fontWeight: '700', marginTop: 2 },
+  shiftRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  shiftTime: { color: C.inkMid, fontSize: 15, marginTop: 2 },
+  actionZone: { flex: 1, minHeight: 300, alignItems: 'center', justifyContent: 'center' },
+  punch: {
+    width: 220, height: 220, borderRadius: 110, backgroundColor: C.brand,
+    alignItems: 'center', justifyContent: 'center', gap: 10,
+    borderWidth: 8, borderColor: C.brandTint,
+  },
+  punchPressed: { backgroundColor: C.brandDeep },
+  punchOut: { backgroundColor: C.paper, borderColor: C.brand, borderWidth: 3 },
+  punchOutPressed: { backgroundColor: C.brandTint },
+  punchDisabled: { backgroundColor: C.line, borderColor: C.pressed, borderWidth: 8 },
+  punchMain: { color: C.onBrand, fontSize: 26, fontWeight: '800' },
+  punchMainOut: { color: C.brand },
+  punchMainDisabled: { color: C.faint },
+  punchHint: { color: C.muted, fontSize: 14, marginTop: 16 },
+  checks: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
+  checksText: { color: C.muted, fontSize: 13 },
 });

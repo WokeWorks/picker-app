@@ -1,16 +1,12 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 
+import { Brand } from '@/components/Brand';
+import { Icon, type IconName } from '@/components/Icon';
 import { C } from '@/theme';
 import { DEVICE_ID_KEY } from '@/native-api';
 
@@ -47,130 +43,108 @@ export default function HomeScreen() {
   }, []);
 
   const isReady = deviceCheck === 'ready';
+  const hasProblem = deviceCheck === 'weak' || deviceCheck === 'unavailable';
 
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.page}>
-        <View style={styles.brandRow}>
-          <View style={styles.brandMark}><Text style={styles.brandGlyph}>O</Text></View>
-          <View>
-            <Text style={styles.brand}>OpsPro</Text>
-            <Text style={styles.product}>PICKER</Text>
-          </View>
-        </View>
+        <Brand />
 
         <View style={styles.hero}>
-          <Text style={styles.eyebrow}>THIS PHONE</Text>
-          <Text style={styles.title}>Make this your clock-in device.</Text>
+          <Text style={styles.title}>Set up this phone for clocking in</Text>
           <Text style={styles.copy}>
-            Your fingerprint or Face ID approves each punch. OpsPro never receives your biometric data.
+            You'll approve every clock-in and clock-out with your fingerprint or face. Your fingerprint and face never leave this phone.
           </Text>
         </View>
 
-        <View style={[styles.devicePanel, isReady && styles.devicePanelReady]}>
-          <View style={styles.scanRing}>
-            {deviceCheck === 'checking' ? (
-              <ActivityIndicator color={C.tealDark} size="large" />
-            ) : (
-              <Text style={styles.scanGlyph}>{isReady ? '✓' : '!'}</Text>
-            )}
+        <View style={[styles.status, isReady && styles.statusReady, hasProblem && styles.statusProblem]}>
+          <View style={[styles.statusIcon, isReady && styles.statusIconReady]}>
+            {deviceCheck === 'checking'
+              ? <ActivityIndicator color={C.brand} />
+              : <Icon name={isReady ? 'check' : 'alert'} size={22} color={isReady ? C.onBrand : C.amber} strokeWidth={2.2} />}
           </View>
-          <View style={styles.deviceCopy}>
-            <Text style={styles.deviceTitle}>{statusTitle(deviceCheck)}</Text>
-            <Text style={styles.deviceDetail}>{statusDetail(deviceCheck)}</Text>
+          <View style={styles.statusCopy}>
+            <Text style={styles.statusTitle}>{statusTitle(deviceCheck)}</Text>
+            <Text style={styles.statusDetail}>{statusDetail(deviceCheck)}</Text>
           </View>
         </View>
 
         <View style={styles.rules}>
-          <Rule number="01" text="One picker, one registered phone" />
-          <Rule number="02" text="Strong fingerprint or Face ID required" />
-          <Rule number="03" text="Location checked at every punch" />
+          <Rule icon="phone" text="One picker, one phone" />
+          <Rule icon="fingerprint" text="Your fingerprint or face approves each punch" />
+          <Rule icon="pin" text="Your location is checked at every punch" />
         </View>
 
         <View style={styles.footer}>
           <Pressable
             accessibilityRole="button"
+            accessibilityState={{ disabled: !isReady }}
             disabled={!isReady}
             onPress={() => router.push('/enroll')}
-            style={({ pressed }) => [
-              styles.primary,
-              !isReady && styles.primaryDisabled,
-              pressed && isReady && styles.primaryPressed,
-            ]}
+            style={({ pressed }) => [styles.primary, !isReady && styles.primaryDisabled, pressed && isReady && styles.primaryPressed]}
           >
-            <Text style={styles.primaryText}>Set up this phone</Text>
-            <Text style={styles.primaryArrow}>→</Text>
+            <Text style={[styles.primaryText, !isReady && styles.primaryTextDisabled]}>Set up this phone</Text>
+            <Icon name="arrowRight" size={22} color={isReady ? C.onBrand : C.faint} strokeWidth={2} />
           </Pressable>
-          <Text style={styles.help}>Need help? Ask your OpsPro supervisor.</Text>
+          <Text style={styles.help}>Need help? Ask your supervisor.</Text>
         </View>
       </View>
     </SafeAreaView>
   );
 }
 
-function Rule({ number, text }: { number: string; text: string }) {
+function Rule({ icon, text }: { icon: IconName; text: string }) {
   return (
     <View style={styles.rule}>
-      <Text style={styles.ruleNumber}>{number}</Text>
+      <View style={styles.ruleIcon}><Icon name={icon} size={18} color={C.brand} /></View>
       <Text style={styles.ruleText}>{text}</Text>
     </View>
   );
 }
 
 function statusTitle(status: DeviceCheck) {
-  if (status === 'checking') return 'Checking device security…';
-  if (status === 'ready') return 'Strong biometrics ready';
-  if (status === 'weak') return 'Stronger security needed';
-  return 'Biometrics not available';
+  if (status === 'checking') return 'Checking this phone…';
+  if (status === 'ready') return 'This phone is ready';
+  if (status === 'weak') return 'Stronger phone lock needed';
+  return 'Fingerprint or face unlock is off';
 }
 
 function statusDetail(status: DeviceCheck) {
   if (status === 'checking') return 'This only takes a moment.';
-  if (status === 'ready') return 'This phone can be registered safely.';
-  if (status === 'weak') return 'Set up a Class 3 fingerprint or secure face unlock.';
-  return 'Set up fingerprint or Face ID in your phone settings.';
+  if (status === 'ready') return 'Fingerprint or face unlock is set up.';
+  if (status === 'weak') return 'Set up fingerprint unlock in your phone settings, then come back.';
+  return 'Turn on fingerprint or face unlock in your phone settings, then come back.';
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.canvas },
-  page: { flex: 1, paddingHorizontal: 24, paddingTop: 18, paddingBottom: 20 },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 11 },
-  brandMark: {
-    width: 38, height: 38, borderRadius: 12, backgroundColor: C.ink,
-    alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-5deg' }],
+  page: { flex: 1, paddingHorizontal: 24, paddingTop: 16, paddingBottom: 20 },
+  hero: { marginTop: 40 },
+  title: { color: C.ink, fontSize: 32, lineHeight: 38, fontWeight: '800', letterSpacing: -0.8 },
+  copy: { color: C.inkMid, fontSize: 16, lineHeight: 24, marginTop: 12 },
+  status: {
+    marginTop: 28, borderWidth: 1, borderColor: C.line, backgroundColor: C.paper,
+    borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14,
   },
-  brandGlyph: { color: C.teal, fontSize: 21, fontWeight: '900' },
-  brand: { color: C.ink, fontSize: 18, fontWeight: '800', letterSpacing: -0.4 },
-  product: { color: C.tealDark, fontSize: 9, fontWeight: '800', letterSpacing: 2.4 },
-  hero: { marginTop: 48 },
-  eyebrow: { color: C.tealDark, fontSize: 12, fontWeight: '800', letterSpacing: 2.2 },
-  title: { color: C.ink, fontSize: 39, lineHeight: 43, fontWeight: '800', letterSpacing: -1.5, marginTop: 10 },
-  copy: { color: C.muted, fontSize: 17, lineHeight: 25, marginTop: 15, maxWidth: 340 },
-  devicePanel: {
-    marginTop: 30, borderWidth: 1, borderColor: C.line, backgroundColor: C.paper,
-    borderRadius: 22, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 16,
-  },
-  devicePanelReady: { borderColor: '#A5E8E2', backgroundColor: C.tealTint },
-  scanRing: {
-    width: 62, height: 62, borderRadius: 31, borderWidth: 2, borderColor: C.teal,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: C.paper,
-  },
-  scanGlyph: { color: C.tealDark, fontSize: 30, fontWeight: '700' },
-  deviceCopy: { flex: 1 },
-  deviceTitle: { color: C.ink, fontSize: 16, fontWeight: '800' },
-  deviceDetail: { color: C.muted, fontSize: 13, lineHeight: 19, marginTop: 4 },
-  rules: { marginTop: 26, borderTopWidth: 1, borderTopColor: C.line },
-  rule: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: C.line },
-  ruleNumber: { width: 40, color: C.tealDark, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
-  ruleText: { flex: 1, color: C.ink, fontSize: 14, fontWeight: '600' },
-  footer: { marginTop: 'auto', paddingTop: 22 },
+  statusReady: { borderColor: C.brandBorder, backgroundColor: C.brandTint },
+  statusProblem: { borderColor: '#FCD34D', backgroundColor: C.amberBg },
+  statusIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.paper, alignItems: 'center', justifyContent: 'center' },
+  statusIconReady: { backgroundColor: C.brand },
+  statusCopy: { flex: 1 },
+  statusTitle: { color: C.ink, fontSize: 16, fontWeight: '700' },
+  statusDetail: { color: C.inkMid, fontSize: 14, lineHeight: 20, marginTop: 2 },
+  rules: { marginTop: 24, gap: 4 },
+  rule: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  ruleIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: C.brandTint, alignItems: 'center', justifyContent: 'center' },
+  ruleText: { flex: 1, color: C.ink, fontSize: 15, fontWeight: '500' },
+  footer: { marginTop: 'auto', paddingTop: 20 },
   primary: {
-    minHeight: 62, borderRadius: 18, backgroundColor: C.teal, paddingHorizontal: 22,
+    minHeight: 58, borderRadius: 14, backgroundColor: C.brand, paddingHorizontal: 20,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
-  primaryDisabled: { backgroundColor: '#C9D4D2' },
-  primaryPressed: { transform: [{ scale: 0.985 }], backgroundColor: '#00B9AA' },
-  primaryText: { color: C.ink, fontSize: 17, fontWeight: '800' },
-  primaryArrow: { color: C.ink, fontSize: 25, fontWeight: '500' },
-  help: { color: C.muted, textAlign: 'center', fontSize: 12, marginTop: 14 },
+  primaryDisabled: { backgroundColor: C.line },
+  primaryPressed: { backgroundColor: C.brandDeep },
+  primaryText: { color: C.onBrand, fontSize: 17, fontWeight: '700' },
+  primaryTextDisabled: { color: C.faint },
+  help: { color: C.muted, textAlign: 'center', fontSize: 13, marginTop: 12 },
 });

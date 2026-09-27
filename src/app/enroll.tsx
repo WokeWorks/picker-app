@@ -6,39 +6,44 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as AppIntegrity from '@expo/app-integrity';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
+import { Icon } from '@/components/Icon';
+import { friendlyError } from '@/messages';
 import { C } from '@/theme';
 import { apiPost, DEVICE_ID_KEY, encodeAndroidEnrollmentPayload, GOOGLE_CLOUD_PROJECT_NUMBER, INSTALL_SECRET_KEY, normalizeEnrollmentCode, sha256 } from '@/native-api';
 
 export default function EnrollScreen() {
   const [code, setCode] = useState('');
   const [checking, setChecking] = useState(false);
+  const codeComplete = normalizeEnrollmentCode(code).length === 10;
 
   async function verifyBiometric() {
     setChecking(true);
     try {
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Approve OpsPro device setup',
-        promptSubtitle: 'This confirms the phone can protect your clock-ins.',
+        promptMessage: 'Approve OpsPro setup',
+        promptSubtitle: 'Use the fingerprint or face you will clock in with.',
         disableDeviceFallback: true,
         biometricsSecurityLevel: 'strong',
         requireConfirmation: true,
       });
 
       if (!result.success) return;
-      if (Platform.OS !== 'android') throw new Error('iOS enrollment is not available yet.');
-      if (!GOOGLE_CLOUD_PROJECT_NUMBER) throw new Error('Play Integrity project is not configured in this build.');
+      if (Platform.OS !== 'android') throw new Error('iPhone setup is not available yet.');
+      if (!GOOGLE_CLOUD_PROJECT_NUMBER) throw new Error('This build of the app is not configured. Ask your supervisor.');
 
+      // A fresh install secret on every setup attempt, so a re-registered phone
+      // never reuses a revoked or replaced credential.
       const installSecret = `${Crypto.randomUUID()}${Crypto.randomUUID()}`;
       const deviceLabel = 'Android picker phone';
       const codeSha256 = await sha256(normalizeEnrollmentCode(code));
@@ -54,7 +59,7 @@ export default function EnrollScreen() {
       await SecureStore.setItemAsync(DEVICE_ID_KEY, enrolled.device_id, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
       router.replace('/clock');
     } catch (error) {
-      Alert.alert('Setup failed', error instanceof Error ? error.message : 'Please try again.');
+      Alert.alert('Setup failed', friendlyError(error));
     } finally {
       setChecking(false);
     }
@@ -63,42 +68,45 @@ export default function EnrollScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.back}>
-          <Text style={styles.backText}>← Back</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.back} hitSlop={8}>
+          <Icon name="arrowLeft" size={20} color={C.brand} strokeWidth={2} />
+          <Text style={styles.backText}>Back</Text>
         </Pressable>
 
-        <View style={styles.step}><Text style={styles.stepText}>STEP 1 OF 2</Text></View>
-        <Text style={styles.title}>Enter your setup code.</Text>
-        <Text style={styles.copy}>Your supervisor creates this one-time code. It links this phone to your picker profile.</Text>
+        <Text style={styles.title}>Enter your setup code</Text>
+        <Text style={styles.copy}>Your admin gives you this code. It links this phone to you, works once, and expires after 15 minutes.</Text>
 
-        <Text style={styles.label}>ONE-TIME SETUP CODE</Text>
+        <Text style={styles.label}>Setup code</Text>
         <TextInput
-          accessibilityLabel="One-time setup code"
+          accessibilityLabel="Setup code"
           autoFocus
           autoCapitalize="characters"
+          autoCorrect={false}
           maxLength={12}
           onChangeText={(value) => setCode(value.toUpperCase())}
           placeholder="OP-XXXX-XXXX"
-          placeholderTextColor="#9AA6A4"
-          style={styles.input}
+          placeholderTextColor={C.faint}
+          style={[styles.input, codeComplete && styles.inputComplete]}
           value={code}
         />
 
         <View style={styles.notice}>
-          <Text style={styles.noticeTitle}>What happens next</Text>
-          <Text style={styles.noticeCopy}>Your phone will ask for fingerprint or Face ID, then register this phone to your picker profile.</Text>
+          <Icon name="info" size={20} color={C.brand} />
+          <Text style={styles.noticeCopy}>Next, your phone asks for your fingerprint or face. Use the one you'll clock in with. Keep this code private, like a password.</Text>
         </View>
 
         <View style={styles.footer}>
           <Pressable
             accessibilityRole="button"
-            disabled={normalizeEnrollmentCode(code).length !== 10 || checking}
+            accessibilityState={{ disabled: !codeComplete || checking, busy: checking }}
+            disabled={!codeComplete || checking}
             onPress={verifyBiometric}
-            style={({ pressed }) => [styles.primary, normalizeEnrollmentCode(code).length !== 10 && styles.disabled, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.primary, !codeComplete && styles.primaryDisabled, pressed && codeComplete && styles.primaryPressed]}
           >
-            {checking ? <ActivityIndicator color={C.ink} /> : <Text style={styles.primaryText}>Check biometrics</Text>}
+            {checking
+              ? <ActivityIndicator color={C.onBrand} />
+              : <Text style={[styles.primaryText, !codeComplete && styles.primaryTextDisabled]}>Continue</Text>}
           </Pressable>
-          <Text style={styles.locked}>The code expires after 15 minutes and works once.</Text>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -107,25 +115,23 @@ export default function EnrollScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.canvas },
-  page: { flex: 1, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 20 },
-  back: { alignSelf: 'flex-start', paddingVertical: 12, paddingRight: 20 },
-  backText: { color: C.tealDark, fontSize: 15, fontWeight: '700' },
-  step: { alignSelf: 'flex-start', marginTop: 28, backgroundColor: C.tealTint, borderRadius: 99, paddingHorizontal: 12, paddingVertical: 7 },
-  stepText: { color: C.tealDark, fontSize: 11, fontWeight: '800', letterSpacing: 1.5 },
-  title: { color: C.ink, fontSize: 38, lineHeight: 42, fontWeight: '800', letterSpacing: -1.4, marginTop: 18 },
-  copy: { color: C.muted, fontSize: 17, lineHeight: 25, marginTop: 14 },
-  label: { color: C.ink, fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginTop: 42, marginBottom: 10 },
+  page: { flex: 1, paddingHorizontal: 24, paddingTop: 8, paddingBottom: 20 },
+  back: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 12, paddingRight: 16 },
+  backText: { color: C.brand, fontSize: 16, fontWeight: '600' },
+  title: { color: C.ink, fontSize: 30, lineHeight: 36, fontWeight: '800', letterSpacing: -0.7, marginTop: 20 },
+  copy: { color: C.inkMid, fontSize: 16, lineHeight: 24, marginTop: 10 },
+  label: { color: C.inkMid, fontSize: 14, fontWeight: '600', marginTop: 32, marginBottom: 8 },
   input: {
-    height: 76, borderWidth: 2, borderColor: C.line, borderRadius: 18, backgroundColor: C.paper,
-    color: C.ink, fontSize: 30, fontWeight: '700', letterSpacing: 12, paddingHorizontal: 20,
+    height: 68, borderWidth: 1.5, borderColor: C.lineStrong, borderRadius: 14, backgroundColor: C.paper,
+    color: C.ink, fontSize: 26, fontWeight: '700', letterSpacing: 4, paddingHorizontal: 18,
   },
-  notice: { marginTop: 22, borderLeftWidth: 3, borderLeftColor: C.teal, paddingLeft: 15, paddingVertical: 3 },
-  noticeTitle: { color: C.ink, fontSize: 14, fontWeight: '800' },
-  noticeCopy: { color: C.muted, fontSize: 13, lineHeight: 20, marginTop: 4 },
+  inputComplete: { borderColor: C.brand },
+  notice: { flexDirection: 'row', gap: 12, marginTop: 20, backgroundColor: C.brandTint, borderRadius: 14, padding: 14 },
+  noticeCopy: { flex: 1, color: C.ink, fontSize: 14, lineHeight: 20 },
   footer: { marginTop: 'auto', paddingTop: 24 },
-  primary: { minHeight: 62, borderRadius: 18, backgroundColor: C.teal, alignItems: 'center', justifyContent: 'center' },
-  disabled: { backgroundColor: '#C9D4D2' },
-  pressed: { transform: [{ scale: 0.985 }] },
-  primaryText: { color: C.ink, fontSize: 17, fontWeight: '800' },
-  locked: { color: C.muted, textAlign: 'center', fontSize: 11, lineHeight: 16, marginTop: 12 },
+  primary: { minHeight: 58, borderRadius: 14, backgroundColor: C.brand, alignItems: 'center', justifyContent: 'center' },
+  primaryDisabled: { backgroundColor: C.line },
+  primaryPressed: { backgroundColor: C.brandDeep },
+  primaryText: { color: C.onBrand, fontSize: 17, fontWeight: '700' },
+  primaryTextDisabled: { color: C.faint },
 });

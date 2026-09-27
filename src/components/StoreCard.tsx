@@ -24,7 +24,7 @@ export function fmtTime(hhmm: string) {
 // A store and its shift times: chain over area on the left, start/end stacked
 // on the right, "Open in Maps" along the bottom when the store has a pin.
 export function StoreCard({ label, store, start, end, style }: {
-  label: string;
+  label?: string;
   store: Store;
   start: string;
   end: string;
@@ -33,8 +33,8 @@ export function StoreCard({ label, store, start, end, style }: {
   const { chain, area } = storeParts(store);
   return (
     <View style={[styles.card, style]}>
-      <Text style={styles.label}>{label}</Text>
-      <View style={styles.top}>
+      {label && <Text style={styles.label}>{label}</Text>}
+      <View style={[styles.top, !label && { paddingTop: 12 }]}>
         <View style={styles.copy}>
           <Text style={styles.chain}>{chain}</Text>
           {area && <Text style={styles.area}>{area}</Text>}

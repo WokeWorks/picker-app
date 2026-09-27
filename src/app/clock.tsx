@@ -224,7 +224,10 @@ export default function ClockScreen() {
         ) : null}
 
         {!onShift && !location && next && (
-          <StoreCard label={`Next shift · ${dayLabel(next.date)}`} store={next} start={next.start} end={next.end} style={styles.gap} />
+          <>
+            <Text style={styles.sectionHead}>{dayLabel(next.date)}</Text>
+            <StoreCard store={next} start={next.start} end={next.end} style={styles.headGap} />
+          </>
         )}
 
         {/* No clock button when there is nothing to clock into (shift done, or no
@@ -304,6 +307,8 @@ const styles = StyleSheet.create({
   page: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 16, paddingBottom: 24 },
   hello: { color: C.ink, fontSize: 32, fontWeight: '800', letterSpacing: -0.8, marginTop: 28 },
   gap: { marginTop: 16 },
+  sectionHead: { color: C.inkMid, fontSize: 15, fontWeight: '700', marginTop: 24 },
+  headGap: { marginTop: 8 },
   donePanel: { marginTop: 16, backgroundColor: C.brandTint, borderWidth: 1, borderColor: C.brandBorder, borderRadius: 16, padding: 18 },
   doneHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   doneLabel: { color: C.brand, fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },

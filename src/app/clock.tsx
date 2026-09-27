@@ -10,6 +10,7 @@ import { useBiometricKind } from '@/biometric';
 import { Brand } from '@/components/Brand';
 import { DEMO_STATES, demoSession, type DemoState } from '@/demo';
 import { Icon } from '@/components/Icon';
+import { ShiftProgress } from '@/components/ShiftProgress';
 import { requestIntegrityToken } from '@/integrity';
 import { hasPin, openDirections } from '@/maps';
 import { friendlyError } from '@/messages';
@@ -36,11 +37,6 @@ function fmtTime(hhmm: string) {
   const [h, m] = hhmm.split(':').map(Number);
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return `${h12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h < 12 ? 'AM' : 'PM'}`;
-}
-
-// A punch time in Dubai time, 12-hour to match the store card ("4:14 PM").
-function clockTime(iso: string) {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dubai' });
 }
 
 // Dubai time, 24h ("13:02"), whatever timezone the phone is set to.
@@ -157,15 +153,8 @@ export default function ClockScreen() {
         )}
 
         <Text style={styles.hello}>Hi {firstName}</Text>
-        {/* Only while on shift: it carries the one fact shown nowhere else, the
-            clock-in time. Before a shift the Clock in button says it all. */}
-        {onShift && (
-          <View style={[styles.statePill, styles.statePillOn]}>
-            <View style={[styles.stateDot, styles.stateDotOn]} />
-            <Text style={[styles.stateText, styles.stateTextOn]}>
-              {session?.clocked_in_at ? `Clocked in since ${clockTime(session.clocked_in_at)}` : 'Clocked in'}
-            </Text>
-          </View>
+        {onShift && session?.clocked_in_at && (
+          <ShiftProgress clockedInAt={session.clocked_in_at} shiftStart={location?.shift_start} shiftEnd={location?.shift_end} />
         )}
 
         <View style={styles.store}>
@@ -249,15 +238,6 @@ const styles = StyleSheet.create({
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   page: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 16, paddingBottom: 24 },
   hello: { color: C.ink, fontSize: 32, fontWeight: '800', letterSpacing: -0.8, marginTop: 36 },
-  statePill: {
-    alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10,
-    backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, borderRadius: 99, paddingHorizontal: 12, paddingVertical: 6,
-  },
-  statePillOn: { backgroundColor: C.greenBg, borderColor: '#A7E8BF' },
-  stateDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.faint },
-  stateDotOn: { backgroundColor: C.green },
-  stateText: { color: C.inkMid, fontSize: 14, fontWeight: '600' },
-  stateTextOn: { color: C.green },
   store: { marginTop: 24, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, borderRadius: 16, overflow: 'hidden' },
   storeTop: { flexDirection: 'row', gap: 12, padding: 16 },
   storeCopy: { flex: 1 },

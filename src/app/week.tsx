@@ -159,11 +159,6 @@ function DayRow({ day, weekday, today }: { day: WeekDay; weekday: string; today:
                 ? `Worked ${duration(Date.parse(day.worked.clockOut) - Date.parse(day.worked.clockIn))}`
                 : `On shift since ${clockTime(Date.parse(day.worked.clockIn))}`}
             </Text>
-            {day.worked.clockOut && (
-              <Text style={styles.statusTimes}>
-                {`  ${clockTime(Date.parse(day.worked.clockIn))} – ${clockTime(Date.parse(day.worked.clockOut))}`}
-              </Text>
-            )}
           </View>
         ) : missed ? (
           <View style={styles.statusRow}>
@@ -221,7 +216,6 @@ const styles = StyleSheet.create({
   store: { color: C.inkMid, fontSize: 14 },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' },
   statusDone: { color: C.green, fontSize: 13, fontWeight: '700' },
-  statusTimes: { color: C.muted, fontSize: 13 },
   statusMissed: { color: C.amber, fontSize: 13, fontWeight: '700' },
   quiet: { color: C.muted, fontSize: 15, fontWeight: '600' },
   mapBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: C.brandBorder, alignItems: 'center', justifyContent: 'center' },

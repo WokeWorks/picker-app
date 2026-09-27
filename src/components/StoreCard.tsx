@@ -33,10 +33,10 @@ export function StoreCard({ label, store, start, end, style }: {
   const { chain, area } = storeParts(store);
   return (
     <View style={[styles.card, style]}>
-      {label && <Text style={styles.label}>{label}</Text>}
-      <View style={[styles.top, !label && { paddingTop: 12 }]}>
+      <View style={styles.top}>
         <View style={styles.copy}>
-          <Text style={styles.chain}>{chain}</Text>
+          {label && <Text style={styles.label}>{label}</Text>}
+          <Text style={[styles.chain, !label && { marginTop: 0 }]}>{chain}</Text>
           {area && <Text style={styles.area}>{area}</Text>}
         </View>
         <View style={styles.times} accessibilityLabel={`${fmtTime(start)} to ${fmtTime(end)}`}>
@@ -64,7 +64,7 @@ export function StoreCard({ label, store, start, end, style }: {
 export function EmptyCard({ title, note, style }: { title: string; note: string; style?: object }) {
   return (
     <View style={[styles.card, style]}>
-      <View style={[styles.top, { paddingTop: 16 }]}>
+      <View style={styles.top}>
         <View style={styles.copy}>
           <Text style={[styles.chain, { marginTop: 0 }]}>{title}</Text>
           <Text style={styles.note}>{note}</Text>
@@ -76,9 +76,10 @@ export function EmptyCard({ title, note, style }: { title: string; note: string;
 
 const styles = StyleSheet.create({
   card: { backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, borderRadius: 16, overflow: 'hidden' },
-  top: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingBottom: 16, paddingTop: 2 },
-  copy: { flex: 1 },
-  label: { color: C.muted, fontSize: 13, fontWeight: '600', paddingHorizontal: 16, paddingTop: 16 },
+  top: { flexDirection: 'row', gap: 12, padding: 16 },
+  // Centred so the store name sits level with the stacked times beside it.
+  copy: { flex: 1, justifyContent: 'center' },
+  label: { color: C.muted, fontSize: 13, fontWeight: '600' },
   chain: { color: C.ink, fontSize: 20, fontWeight: '700', marginTop: 4 },
   area: { color: C.inkMid, fontSize: 18, fontWeight: '500', marginTop: 1 },
   note: { color: C.inkMid, fontSize: 14, lineHeight: 20, marginTop: 4 },

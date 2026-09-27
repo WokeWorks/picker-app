@@ -43,6 +43,12 @@
         {
           "locationWhenInUsePermission": "Allow OpsPro Picker to verify that you are at your rostered store when you clock in or out."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#1B5746"
+        }
       ]
     ],
     "experiments": {

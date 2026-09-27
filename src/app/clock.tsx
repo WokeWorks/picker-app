@@ -14,6 +14,7 @@ import { DonePanel } from '@/components/DonePanel';
 import { EmptyCard, StoreCard } from '@/components/StoreCard';
 import { DEMO_STATES, demoSession, type DemoState } from '@/demo';
 import { requestIntegrityToken } from '@/integrity';
+import { registerForReminders } from '@/notifications';
 import { friendlyError } from '@/messages';
 import { C } from '@/theme';
 import { apiPost, INSTALL_SECRET_KEY } from '@/native-api';
@@ -65,6 +66,15 @@ export default function ClockScreen() {
   }, [refresh]);
 
   useEffect(reload, [reload]);
+
+  // Once per launch on a registered phone: ask for notification permission and
+  // register for shift reminders. Not in the preview (no real phone behind it).
+  useEffect(() => {
+    if (demo) return;
+    SecureStore.getItemAsync(INSTALL_SECRET_KEY).then((secret) => {
+      if (secret) registerForReminders(secret);
+    });
+  }, [demo]);
 
   async function punch() {
     if (!session || session.locations.length !== 1) return;

@@ -13,14 +13,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
-import * as AppIntegrity from '@expo/app-integrity';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
 import { Icon } from '@/components/Icon';
+import { requestIntegrityToken } from '@/integrity';
 import { friendlyError } from '@/messages';
 import { C } from '@/theme';
-import { apiPost, DEVICE_ID_KEY, encodeAndroidEnrollmentPayload, GOOGLE_CLOUD_PROJECT_NUMBER, INSTALL_SECRET_KEY, normalizeEnrollmentCode, sha256 } from '@/native-api';
+import { apiPost, DEVICE_ID_KEY, encodeAndroidEnrollmentPayload, INSTALL_SECRET_KEY, normalizeEnrollmentCode, sha256 } from '@/native-api';
 
 export default function EnrollScreen() {
   const [code, setCode] = useState('');
@@ -40,7 +40,6 @@ export default function EnrollScreen() {
 
       if (!result.success) return;
       if (Platform.OS !== 'android') throw new Error('iPhone setup is not available yet.');
-      if (!GOOGLE_CLOUD_PROJECT_NUMBER) throw new Error('This build of the app is not configured. Ask your supervisor.');
 
       // A fresh install secret on every setup attempt, so a re-registered phone
       // never reuses a revoked or replaced credential.
@@ -50,8 +49,7 @@ export default function EnrollScreen() {
       const installIdHash = await sha256(installSecret);
       const proofPayload = encodeAndroidEnrollmentPayload({ codeSha256, installIdHash, deviceLabel });
       const requestHash = await sha256(proofPayload);
-      await AppIntegrity.prepareIntegrityTokenProviderAsync(GOOGLE_CLOUD_PROJECT_NUMBER);
-      const integrityToken = await AppIntegrity.requestIntegrityCheckAsync(requestHash);
+      const integrityToken = await requestIntegrityToken(requestHash);
       const enrolled = await apiPost<{ device_id: string }>('/api/mobile/enroll', {
         code, platform: 'android', install_secret: installSecret, device_label: deviceLabel, integrity_token: integrityToken,
       });

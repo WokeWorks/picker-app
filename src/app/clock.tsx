@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as AppIntegrity from '@expo/app-integrity';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 
 import { Brand } from '@/components/Brand';
 import { Icon } from '@/components/Icon';
+import { requestIntegrityToken } from '@/integrity';
 import { friendlyError } from '@/messages';
 import { C } from '@/theme';
-import { apiPost, GOOGLE_CLOUD_PROJECT_NUMBER, INSTALL_SECRET_KEY } from '@/native-api';
+import { apiPost, INSTALL_SECRET_KEY } from '@/native-api';
 
 type Session = {
   employee: { id: string; name: string };
@@ -47,7 +47,6 @@ export default function ClockScreen() {
     const clockingIn = session.action === 'clock_in';
     setBusy(true);
     try {
-      if (!GOOGLE_CLOUD_PROJECT_NUMBER) throw new Error('This build of the app is not configured. Ask your supervisor.');
       const installSecret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
       if (!installSecret) throw new Error('device_inactive');
       const permission = await Location.requestForegroundPermissionsAsync();
@@ -74,8 +73,7 @@ export default function ClockScreen() {
         gps_accuracy: position.coords.accuracy,
         location_mocked: false, // a mocked position is refused above, before any request
       });
-      await AppIntegrity.prepareIntegrityTokenProviderAsync(GOOGLE_CLOUD_PROJECT_NUMBER);
-      const integrityToken = await AppIntegrity.requestIntegrityCheckAsync(challenge.request_hash);
+      const integrityToken = await requestIntegrityToken(challenge.request_hash);
       const done = await apiPost<{ timestamp: string }>('/api/mobile/punch/commit', { install_secret: installSecret, payload: challenge.payload, integrity_token: integrityToken });
       await refresh();
       Alert.alert(clockingIn ? 'Clocked in' : 'Clocked out', `Recorded at ${gstTime(done.timestamp)}.`);

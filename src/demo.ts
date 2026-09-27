@@ -11,7 +11,7 @@ export const DEMO_STATES: Array<{ id: DemoState; label: string }> = [
 ];
 
 export function demoSession(state: DemoState) {
-  const store = { id: 'demo-store', name: 'Carrefour · Mall of the Emirates', shift_start: '13:00', shift_end: '23:00' };
+  const store = { id: 'demo-store', name: 'Carrefour · Mall of the Emirates', shift_start: '13:00', shift_end: '23:00', lat: 25.1181, lng: 55.2006 };
   return {
     employee: { id: 'demo', name: 'Saeed Sajid' },
     action: state === 'on' ? 'clock_out' as const : 'clock_in' as const,

@@ -1,10 +1,11 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Linking, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 
 import { Icon } from '@/components/Icon';
+import { openDirections } from '@/maps';
 import { friendlyError } from '@/messages';
 import { apiPost, INSTALL_SECRET_KEY } from '@/native-api';
 import { C } from '@/theme';
@@ -19,15 +20,6 @@ function gstTime(iso: string) {
   return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' });
 }
 function fmtHours(h: number) { return `${Math.round(h * 10) / 10}h`; }
-
-function openDirections(store: NonNullable<WeekDay['store']>) {
-  if (store.lat == null || store.lng == null) return;
-  const q = `${store.lat},${store.lng}`;
-  const url = Platform.OS === 'ios'
-    ? `https://maps.apple.com/?daddr=${q}`
-    : `https://www.google.com/maps/dir/?api=1&destination=${q}`;
-  Linking.openURL(url).catch(() => {});
-}
 
 export default function WeekScreen() {
   const params = useLocalSearchParams<{ demo?: string }>();

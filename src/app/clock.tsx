@@ -11,6 +11,7 @@ import { Brand } from '@/components/Brand';
 import { DEMO_STATES, demoSession, type DemoState } from '@/demo';
 import { Icon } from '@/components/Icon';
 import { requestIntegrityToken } from '@/integrity';
+import { hasPin, openDirections } from '@/maps';
 import { friendlyError } from '@/messages';
 import { C } from '@/theme';
 import { apiPost, INSTALL_SECRET_KEY } from '@/native-api';
@@ -19,7 +20,7 @@ type Session = {
   employee: { id: string; name: string };
   action: 'clock_in' | 'clock_out';
   clocked_in_at: string | null;
-  locations: Array<{ id: string; name: string; shift_start: string; shift_end: string }>;
+  locations: Array<{ id: string; name: string; shift_start: string; shift_end: string; lat: number | null; lng: number | null }>;
 };
 
 // Dubai time, 24h ("13:02"), whatever timezone the phone is set to.
@@ -145,7 +146,13 @@ export default function ClockScreen() {
           </Text>
         </View>
 
-        <View style={styles.store}>
+        <Pressable
+          accessibilityRole={hasPin(location) ? 'link' : undefined}
+          accessibilityLabel={hasPin(location) ? `Directions to ${location.name}` : undefined}
+          disabled={!hasPin(location)}
+          onPress={() => location && openDirections(location)}
+          style={({ pressed }) => [styles.store, pressed && { backgroundColor: C.pressed }]}
+        >
           <Icon name="pin" size={22} color={location ? C.brand : C.faint} />
           <View style={styles.storeCopy}>
             <Text style={styles.storeLabel}>{onShift ? 'Your store' : "Today's store"}</Text>
@@ -154,7 +161,13 @@ export default function ClockScreen() {
               ? <View style={styles.shiftRow}><Icon name="clock" size={15} color={C.muted} /><Text style={styles.shiftTime}>{location.shift_start} – {location.shift_end}</Text></View>
               : <Text style={styles.shiftTime}>Clock-in opens 90 minutes before your rostered start.</Text>}
           </View>
-        </View>
+          {hasPin(location) && (
+            <View style={styles.mapHint}>
+              <Text style={styles.mapHintText}>Map</Text>
+              <Icon name="arrowRight" size={16} color={C.brand} strokeWidth={2} />
+            </View>
+          )}
+        </Pressable>
 
         <View style={styles.actionZone}>
           <Pressable
@@ -218,6 +231,8 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: C.line, borderRadius: 16, padding: 16,
   },
   storeCopy: { flex: 1 },
+  mapHint: { flexDirection: 'row', alignItems: 'center', gap: 2, alignSelf: 'center' },
+  mapHintText: { color: C.brand, fontSize: 14, fontWeight: '700' },
   storeLabel: { color: C.muted, fontSize: 13, fontWeight: '600' },
   storeName: { color: C.ink, fontSize: 20, fontWeight: '700', marginTop: 2 },
   shiftRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },

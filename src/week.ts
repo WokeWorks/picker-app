@@ -8,7 +8,7 @@ export type WeekDay = {
   status: WeekDayStatus;     // off = explicit OFF; covered = given to a reliever; none = not rostered
   start: string | null;      // "13:00"
   end: string | null;
-  store: { name: string; lat: number | null; lng: number | null } | null;
+  store: { name: string; chain?: string | null; area?: string | null; lat: number | null; lng: number | null } | null;
   worked: { clockIn: string; clockOut: string | null; hours: number } | null; // clockOut null = still on shift
 };
 
@@ -43,8 +43,8 @@ export function demoWeek(which: 'this' | 'next'): Week {
   const today = gstToday();
   const dow = (new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7; // 0 = Monday
   const monday = addDays(today, -dow + (which === 'next' ? 7 : 0));
-  const dubaiMall = { name: 'Waitrose · Dubai Mall', lat: 25.1972, lng: 55.2796 };
-  const moe = { name: 'Carrefour · Mall of the Emirates', lat: 25.1181, lng: 55.2006 };
+  const dubaiMall = { name: 'Waitrose · Dubai Mall', chain: 'Waitrose', area: 'Dubai Mall', lat: 25.1972, lng: 55.2796 };
+  const moe = { name: 'Carrefour · Mall of the Emirates', chain: 'Carrefour', area: 'Mall of the Emirates', lat: 25.1181, lng: 55.2006 };
   const plan: Array<Partial<WeekDay> & { status: WeekDayStatus }> = which === 'this'
     ? [
         { status: 'scheduled', start: '13:00', end: '23:00', store: moe },

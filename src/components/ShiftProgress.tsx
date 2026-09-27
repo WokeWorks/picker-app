@@ -14,7 +14,8 @@ export function clockTime(ms: number) {
 export function duration(ms: number) {
   const mins = Math.max(0, Math.floor(ms / 60_000));
   const h = Math.floor(mins / 60);
-  return h ? `${h}h ${mins % 60}m` : `${mins}m`;
+  if (!h) return `${mins}m`;
+  return mins % 60 ? `${h}h ${mins % 60}m` : `${h}h`;
 }
 
 // The rostered end as an instant: the clock-in's Dubai date + the end time,

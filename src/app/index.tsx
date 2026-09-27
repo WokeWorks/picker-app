@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 
+import { useBiometricKind } from '@/biometric';
 import { Brand } from '@/components/Brand';
 import { Icon, type IconName } from '@/components/Icon';
 import { C } from '@/theme';
@@ -14,6 +15,7 @@ type DeviceCheck = 'checking' | 'ready' | 'weak' | 'unavailable';
 
 export default function HomeScreen() {
   const [deviceCheck, setDeviceCheck] = useState<DeviceCheck>('checking');
+  const bio = useBiometricKind();
 
   useEffect(() => {
     let mounted = true;
@@ -71,7 +73,7 @@ export default function HomeScreen() {
 
         <View style={styles.rules}>
           <Rule icon="phone" text="One picker, one phone" />
-          <Rule icon="fingerprint" text="Your fingerprint or face approves each punch" />
+          <Rule icon={bio} text={`Your ${bio === 'face' ? 'face' : 'fingerprint'} approves each punch`} />
           <Rule icon="pin" text="Your location is checked at every punch" />
         </View>
 

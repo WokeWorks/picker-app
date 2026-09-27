@@ -6,6 +6,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 
+import { useBiometricKind } from '@/biometric';
 import { Brand } from '@/components/Brand';
 import { DEMO_STATES, demoSession, type DemoState } from '@/demo';
 import { Icon } from '@/components/Icon';
@@ -34,6 +35,7 @@ export default function ClockScreen() {
   const params = useLocalSearchParams<{ demo?: string }>();
   const demo = __DEV__ && params.demo === '1';
   const [demoState, setDemoState] = useState<DemoState>('before');
+  const bio = useBiometricKind();
 
   const refresh = useCallback(async () => {
     if (demo) { setSession(demoSession(demoState)); return; }
@@ -169,13 +171,13 @@ export default function ClockScreen() {
             ]}
           >
             {busy ? <ActivityIndicator color={onShift ? C.brand : C.onBrand} size="large" /> : <>
-              <Icon name="fingerprint" size={40} color={!canPunch ? C.faint : onShift ? C.brand : C.onBrand} strokeWidth={1.6} />
+              <Icon name={bio} size={44} color={!canPunch ? C.faint : onShift ? C.brand : C.onBrand} strokeWidth={1.6} />
               <Text style={[styles.punchMain, onShift && styles.punchMainOut, !canPunch && styles.punchMainDisabled]}>
                 {onShift ? 'Clock out' : 'Clock in'}
               </Text>
             </>}
           </Pressable>
-          <Text style={styles.punchHint}>Tap, then use your fingerprint or face</Text>
+          <Text style={styles.punchHint}>Tap, then use your {bio === 'face' ? 'face' : 'fingerprint'}</Text>
         </View>
 
         <Pressable

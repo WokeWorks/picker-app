@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -178,6 +178,16 @@ export default function ClockScreen() {
           <Text style={styles.punchHint}>Tap, then use your fingerprint or face</Text>
         </View>
 
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push(demo ? '/week?demo=1' : '/week')}
+          style={({ pressed }) => [styles.weekCard, pressed && { backgroundColor: C.pressed }]}
+        >
+          <Icon name="clock" size={20} color={C.brand} />
+          <Text style={styles.weekCardText}>Your shifts this week and next</Text>
+          <Icon name="arrowRight" size={18} color={C.muted} />
+        </Pressable>
+
         <View style={styles.checks}>
           <Icon name="checkCircle" size={16} color={C.muted} />
           <Text style={styles.checksText}>Your location and roster are checked with every punch</Text>
@@ -231,6 +241,11 @@ const styles = StyleSheet.create({
   demoChipOn: { backgroundColor: C.ink, borderColor: C.ink },
   demoChipText: { color: C.inkMid, fontSize: 12, fontWeight: '600' },
   demoChipTextOn: { color: C.paper },
+  weekCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.paper,
+    borderWidth: 1, borderColor: C.line, borderRadius: 14, padding: 16, marginBottom: 16,
+  },
+  weekCardText: { flex: 1, color: C.ink, fontSize: 15, fontWeight: '600' },
   checks: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
   checksText: { color: C.muted, fontSize: 13 },
 });

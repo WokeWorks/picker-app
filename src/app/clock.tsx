@@ -29,15 +29,12 @@ type Session = {
   next_shift?: (Store & { date: string; start: string; end: string }) | null;
 };
 
-// Always the weekday and date ("Monday 28 September"), prefixed "Today" or
-// "Tomorrow" when that is what it is (Dubai calendar).
+// The card label for the next shift, like "Today's store": "Tomorrow", or the
+// weekday ("Monday") when it is further out (Dubai calendar).
 function dayLabel(iso: string) {
-  const today = new Date(Date.now() + 4 * 3_600_000).toISOString().slice(0, 10);
   const tomorrow = new Date(Date.now() + 28 * 3_600_000).toISOString().slice(0, 10);
-  const date = new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).replace(',', '');
-  if (iso === today) return `Today, ${date}`;
-  if (iso === tomorrow) return `Tomorrow, ${date}`;
-  return date;
+  if (iso === tomorrow) return 'Tomorrow';
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });
 }
 
 export default function ClockScreen() {
@@ -224,10 +221,7 @@ export default function ClockScreen() {
         ) : null}
 
         {!onShift && !location && next && (
-          <>
-            <Text style={styles.sectionHead}>{dayLabel(next.date)}</Text>
-            <StoreCard store={next} start={next.start} end={next.end} style={styles.headGap} />
-          </>
+          <StoreCard label={dayLabel(next.date)} store={next} start={next.start} end={next.end} style={styles.gap} />
         )}
 
         {/* No clock button when there is nothing to clock into (shift done, or no
@@ -307,8 +301,6 @@ const styles = StyleSheet.create({
   page: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 16, paddingBottom: 24 },
   hello: { color: C.ink, fontSize: 32, fontWeight: '800', letterSpacing: -0.8, marginTop: 28 },
   gap: { marginTop: 16 },
-  sectionHead: { color: C.inkMid, fontSize: 15, fontWeight: '700', marginTop: 24 },
-  headGap: { marginTop: 8 },
   donePanel: { marginTop: 16, backgroundColor: C.brandTint, borderWidth: 1, borderColor: C.brandBorder, borderRadius: 16, padding: 18 },
   doneHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   doneLabel: { color: C.brand, fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },

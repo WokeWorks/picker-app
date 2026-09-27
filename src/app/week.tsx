@@ -19,6 +19,13 @@ function monthName(iso: string) { return MONTHS[Number(iso.slice(5, 7)) - 1]; }
 function gstTime(iso: string) {
   return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' });
 }
+// "21 September – 27 September"; the years only appear when the week crosses
+// New Year ("28 December 2026 – 3 January 2027").
+function weekRange(first: string, last: string) {
+  const crossesYear = first.slice(0, 4) !== last.slice(0, 4);
+  const label = (iso: string) => `${dayNum(iso)} ${monthName(iso)}${crossesYear ? ` ${iso.slice(0, 4)}` : ''}`;
+  return `${label(first)} – ${label(last)}`;
+}
 function fmtHours(h: number) { return `${Math.round(h * 10) / 10}h`; }
 
 export default function WeekScreen() {
@@ -47,7 +54,7 @@ export default function WeekScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  const range = week ? `${dayNum(week.days[0].date)} ${monthName(week.days[0].date)} – ${dayNum(week.days[6].date)} ${monthName(week.days[6].date)}` : '';
+  const range = week ? weekRange(week.days[0].date, week.days[6].date) : '';
   const shifts = week?.days.filter((d) => d.status === 'scheduled').length ?? 0;
 
   return (

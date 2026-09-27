@@ -179,7 +179,7 @@ export default function ClockScreen() {
           </View>
         )}
 
-        <Text style={styles.hello}>Hi {firstName}</Text>
+        <Text style={styles.hello}>Hi {firstName}!</Text>
 
         {onShift && session?.clocked_in_at && (
           <ShiftProgress

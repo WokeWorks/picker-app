@@ -12,7 +12,7 @@ import { C } from '@/theme';
 import { demoWeek, shiftHours, type Week, type WeekDay } from '@/week';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 function dayNum(iso: string) { return Number(iso.slice(8, 10)); }
 function monthName(iso: string) { return MONTHS[Number(iso.slice(5, 7)) - 1]; }
@@ -76,7 +76,7 @@ export default function WeekScreen() {
             <View style={styles.summary}>
               <Text style={styles.range}>{range}</Text>
               <View style={styles.summaryRow}>
-                <Stat value={String(shifts)} label={shifts === 1 ? 'shift' : 'shifts'} />
+                <Stat first value={String(shifts)} label={shifts === 1 ? 'shift' : 'shifts'} />
                 <Stat value={fmtHours(week.rosteredHours)} label="rostered" />
                 {which === 'this' && <Stat value={fmtHours(week.workedHours)} label="worked so far" accent />}
               </View>
@@ -96,9 +96,9 @@ export default function WeekScreen() {
   );
 }
 
-function Stat({ value, label, accent }: { value: string; label: string; accent?: boolean }) {
+function Stat({ value, label, accent, first }: { value: string; label: string; accent?: boolean; first?: boolean }) {
   return (
-    <View style={styles.stat}>
+    <View style={[styles.stat, !first && styles.statDivided]}>
       <Text style={[styles.statValue, accent && { color: C.brand }]}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
@@ -117,11 +117,11 @@ function DayRow({ day, weekday, today }: { day: WeekDay; weekday: string; today:
       ? { text: `Clocked ${gstTime(day.worked.clockIn)} – ${gstTime(day.worked.clockOut)} · ${fmtHours(day.worked.hours)}`, color: C.green, icon: 'checkCircle' }
       : { text: `On shift since ${gstTime(day.worked.clockIn)}`, color: C.green, icon: 'clock' };
   } else if (missed) {
-    detail = { text: 'No clock-in recorded. Talk to your supervisor.', color: C.amber, icon: 'alert' };
+    detail = { text: 'No clock-in recorded', color: C.amber, icon: 'alert' };
   }
 
   return (
-    <View style={[styles.day, isToday && styles.dayToday, isPast && !isToday && styles.dayPast]}>
+    <View style={[styles.day, isToday && styles.dayToday]}>
       <View style={styles.dateCol}>
         <Text style={[styles.weekday, isToday && styles.todayInk]}>{isToday ? 'Today' : weekday}</Text>
         <Text style={[styles.dateNum, isToday && styles.todayInk]}>{dayNum(day.date)}</Text>
@@ -176,14 +176,14 @@ const styles = StyleSheet.create({
   error: { color: C.danger, fontSize: 15, marginTop: 24, textAlign: 'center' },
   summary: { marginTop: 20 },
   range: { color: C.muted, fontSize: 14, fontWeight: '600' },
-  summaryRow: { flexDirection: 'row', gap: 24, marginTop: 8 },
-  stat: {},
+  summaryRow: { flexDirection: 'row', marginTop: 10, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, borderRadius: 14 },
+  stat: { width: '33.333%', paddingVertical: 12, paddingHorizontal: 14 },
+  statDivided: { borderLeftWidth: 1, borderLeftColor: C.line },
   statValue: { color: C.ink, fontSize: 24, fontWeight: '800' },
   statLabel: { color: C.muted, fontSize: 13 },
   days: { marginTop: 20, gap: 10 },
   day: { flexDirection: 'row', backgroundColor: C.paper, borderRadius: 14, borderWidth: 1, borderColor: C.line, padding: 14, gap: 14 },
   dayToday: { borderColor: C.brand, borderWidth: 2, backgroundColor: C.brandTint },
-  dayPast: { backgroundColor: 'transparent' },
   dateCol: { width: 48, alignItems: 'center' },
   weekday: { color: C.muted, fontSize: 13, fontWeight: '600' },
   dateNum: { color: C.ink, fontSize: 24, fontWeight: '800', marginTop: 2 },

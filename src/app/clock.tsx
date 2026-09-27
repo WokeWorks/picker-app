@@ -29,13 +29,15 @@ type Session = {
   next_shift?: (Store & { date: string; start: string; end: string }) | null;
 };
 
-// "Tomorrow", or "Monday 29 September" further out (Dubai calendar).
+// Always the weekday and date ("Monday 28 September"), prefixed "Today" or
+// "Tomorrow" when that is what it is (Dubai calendar).
 function dayLabel(iso: string) {
   const today = new Date(Date.now() + 4 * 3_600_000).toISOString().slice(0, 10);
   const tomorrow = new Date(Date.now() + 28 * 3_600_000).toISOString().slice(0, 10);
-  if (iso === today) return 'Today';
-  if (iso === tomorrow) return 'Tomorrow';
-  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+  const date = new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).replace(',', '');
+  if (iso === today) return `Today, ${date}`;
+  if (iso === tomorrow) return `Tomorrow, ${date}`;
+  return date;
 }
 
 export default function ClockScreen() {

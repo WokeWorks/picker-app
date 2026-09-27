@@ -33,9 +33,9 @@ export function StoreCard({ label, store, start, end, style }: {
   const { chain, area } = storeParts(store);
   return (
     <View style={[styles.card, style]}>
+      <Text style={styles.label}>{label}</Text>
       <View style={styles.top}>
         <View style={styles.copy}>
-          <Text style={styles.label}>{label}</Text>
           <Text style={styles.chain}>{chain}</Text>
           {area && <Text style={styles.area}>{area}</Text>}
         </View>
@@ -64,9 +64,9 @@ export function StoreCard({ label, store, start, end, style }: {
 export function EmptyCard({ title, note, style }: { title: string; note: string; style?: object }) {
   return (
     <View style={[styles.card, style]}>
-      <View style={styles.top}>
+      <View style={[styles.top, { paddingTop: 16 }]}>
         <View style={styles.copy}>
-          <Text style={styles.chain}>{title}</Text>
+          <Text style={[styles.chain, { marginTop: 0 }]}>{title}</Text>
           <Text style={styles.note}>{note}</Text>
         </View>
       </View>
@@ -76,9 +76,9 @@ export function EmptyCard({ title, note, style }: { title: string; note: string;
 
 const styles = StyleSheet.create({
   card: { backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, borderRadius: 16, overflow: 'hidden' },
-  top: { flexDirection: 'row', gap: 12, padding: 16 },
+  top: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingBottom: 16, paddingTop: 2 },
   copy: { flex: 1 },
-  label: { color: C.muted, fontSize: 13, fontWeight: '600' },
+  label: { color: C.muted, fontSize: 13, fontWeight: '600', paddingHorizontal: 16, paddingTop: 16 },
   chain: { color: C.ink, fontSize: 20, fontWeight: '700', marginTop: 4 },
   area: { color: C.inkMid, fontSize: 18, fontWeight: '500', marginTop: 1 },
   note: { color: C.inkMid, fontSize: 14, lineHeight: 20, marginTop: 4 },

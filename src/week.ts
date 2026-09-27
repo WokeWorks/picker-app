@@ -67,6 +67,10 @@ export function demoWeek(which: 'this' | 'next'): Week {
   const days: WeekDay[] = plan.map((p, i) => {
     const date = addDays(monday, i);
     const day: WeekDay = { date, status: p.status, start: p.start ?? null, end: p.end ?? null, store: p.store ?? null, worked: null };
+    // Today's shift is in progress, to show the live "On shift" line.
+    if (p.status === 'scheduled' && date === today) {
+      day.worked = { clockIn: new Date(Date.now() - (3 * 60 + 12) * 60_000).toISOString(), clockOut: null, hours: 0 };
+    }
     // Past rostered days were worked, except one missed day to show that state.
     if (p.status === 'scheduled' && p.start && date < today && i !== 1) {
       const inAt = new Date(`${date}T${p.start}:00+04:00`).getTime() + 4 * 60_000;

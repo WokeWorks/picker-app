@@ -29,12 +29,14 @@ type Session = {
   next_shift?: (Store & { date: string; start: string; end: string }) | null;
 };
 
-// The card label for the next shift, like "Today's store": "Tomorrow", or the
-// weekday ("Monday") when it is further out (Dubai calendar).
+// The card label for the next shift, like "Today's store": "Tomorrow", then
+// "In 2 days", "In 3 days"... (Dubai calendar days).
 function dayLabel(iso: string) {
-  const tomorrow = new Date(Date.now() + 28 * 3_600_000).toISOString().slice(0, 10);
-  if (iso === tomorrow) return 'Tomorrow';
-  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });
+  const today = new Date(Date.now() + 4 * 3_600_000).toISOString().slice(0, 10);
+  const days = Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Tomorrow';
+  return `In ${days} days`;
 }
 
 export default function ClockScreen() {

@@ -236,7 +236,7 @@ export default function ClockScreen() {
                 style={({ pressed }) => [styles.punch, styles.punchBreak, pressed && styles.punchBreakPressed]}
               >
                 {busy ? <ActivityIndicator color={C.accentYellow} size="large" /> : <>
-                  <Icon name="clock" size={40} color={C.accentYellow} strokeWidth={1.6} />
+                  <Icon name="tea" size={42} color={C.accentYellow} strokeWidth={1.6} />
                   <Text style={[styles.punchMain, styles.punchMainBreak]}>End break</Text>
                 </>}
               </Pressable>
@@ -269,7 +269,7 @@ export default function ClockScreen() {
               </Pressable>
             ) : onShift && !breakUsed ? (
               <Pressable accessibilityRole="button" onPress={confirmStartBreak} disabled={busy} style={({ pressed }) => [styles.breakBtn, pressed && { backgroundColor: C.pressed }]}>
-                <Icon name="clock" size={18} color={C.ink} />
+                <Icon name="tea" size={19} color={C.ink} />
                 <Text style={styles.breakBtnText}>Start 1-hour break</Text>
               </Pressable>
             ) : onShift ? (

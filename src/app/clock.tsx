@@ -225,7 +225,9 @@ export default function ClockScreen() {
           <StoreCard label={`Next shift · ${dayLabel(next.date)}`} store={next} start={next.start} end={next.end} style={styles.gap} />
         )}
 
-        {!done && (
+        {/* No clock button when there is nothing to clock into (shift done, or no
+            shift open right now) rather than a greyed-out one. */}
+        {!done && (onShift || !!location) && (
           <View style={styles.actionZone}>
             {onBreak ? (
               <Pressable
@@ -283,7 +285,7 @@ export default function ClockScreen() {
         <Pressable
           accessibilityRole="button"
           onPress={() => router.push(demo ? '/week?demo=1' : '/week')}
-          style={({ pressed }) => [styles.weekCard, done && styles.gap, pressed && { backgroundColor: C.pressed }]}
+          style={({ pressed }) => [styles.weekCard, (done || (!onShift && !location)) && styles.gap, pressed && { backgroundColor: C.pressed }]}
         >
           <Icon name="clock" size={20} color={C.brand} />
           <Text style={styles.weekCardText}>Your shift schedule</Text>

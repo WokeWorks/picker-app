@@ -9,7 +9,7 @@ import { openDirections } from '@/maps';
 import { friendlyError } from '@/messages';
 import { apiPost, INSTALL_SECRET_KEY } from '@/native-api';
 import { C } from '@/theme';
-import { demoWeek, shiftHours, type Week, type WeekDay } from '@/week';
+import { demoWeek, type Week, type WeekDay } from '@/week';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -130,7 +130,7 @@ function DayRow({ day, weekday, today }: { day: WeekDay; weekday: string; today:
       <View style={styles.dayBody}>
         {working && day.start && day.end ? (
           <>
-            <Text style={styles.time}>{day.start} – {day.end} <Text style={styles.len}>· {fmtHours(shiftHours(day.start, day.end))}</Text></Text>
+            <Text style={styles.time}>{day.start} – {day.end}</Text>
             {day.store && (
               <Pressable
                 accessibilityRole="link"
@@ -190,7 +190,6 @@ const styles = StyleSheet.create({
   todayInk: { color: C.brand },
   dayBody: { flex: 1, justifyContent: 'center', gap: 5 },
   time: { color: C.ink, fontSize: 17, fontWeight: '700' },
-  len: { color: C.muted, fontWeight: '500', fontSize: 15 },
   storeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   store: { flexShrink: 1, color: C.inkMid, fontSize: 14 },
   directions: { color: C.brand, fontSize: 13, fontWeight: '700', marginLeft: 'auto' },

@@ -9,7 +9,8 @@ import * as SecureStore from 'expo-secure-store';
 import { useBiometricKind } from '@/biometric';
 import { Brand } from '@/components/Brand';
 import { Icon } from '@/components/Icon';
-import { clockTime, duration, ShiftProgress } from '@/components/ShiftProgress';
+import { ShiftProgress } from '@/components/ShiftProgress';
+import { DonePanel } from '@/components/DonePanel';
 import { EmptyCard, StoreCard } from '@/components/StoreCard';
 import { DEMO_STATES, demoSession, type DemoState } from '@/demo';
 import { requestIntegrityToken } from '@/integrity';
@@ -204,18 +205,7 @@ export default function ClockScreen() {
         )}
 
         {done && session?.done_today && (
-          <View style={styles.donePanel}>
-            <View style={styles.doneHead}>
-              <Icon name="checkCircle" size={20} color={C.brand} strokeWidth={2} />
-              <Text style={styles.doneLabel}>Shift done</Text>
-            </View>
-            <Text style={styles.doneBig}>
-              {duration(Date.parse(session.done_today.clock_out) - Date.parse(session.done_today.clock_in))}
-            </Text>
-            <Text style={styles.doneMeta}>
-              {clockTime(Date.parse(session.done_today.clock_in))} – {clockTime(Date.parse(session.done_today.clock_out))}
-            </Text>
-          </View>
+          <DonePanel clockIn={session.done_today.clock_in} clockOut={session.done_today.clock_out} />
         )}
 
         {location ? (
@@ -306,13 +296,6 @@ const styles = StyleSheet.create({
   page: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 16, paddingBottom: 24 },
   hello: { color: C.ink, fontSize: 32, fontWeight: '800', letterSpacing: -0.8, marginTop: 28 },
   gap: { marginTop: 16 },
-  // GrowHub yellow with brand-green type (6.4:1): green = on shift, orange =
-  // on break, yellow = done.
-  donePanel: { marginTop: 16, backgroundColor: C.accentYellow, borderRadius: 16, padding: 18 },
-  doneHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  doneLabel: { color: C.brand, fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
-  doneBig: { color: C.ink, fontSize: 40, fontWeight: '800', letterSpacing: -1, marginTop: 4 },
-  doneMeta: { color: C.inkMid, fontSize: 15, marginTop: 2 },
   actionZone: { flex: 1, minHeight: 300, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
   punch: {
     width: 220, height: 220, borderRadius: 110, backgroundColor: C.brand,

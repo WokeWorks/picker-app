@@ -86,7 +86,7 @@ export default function EnrollScreen() {
 
         <View style={styles.notice}>
           <Text style={styles.noticeTitle}>What happens next</Text>
-          <Text style={styles.noticeCopy}>Your phone will ask for fingerprint or Face ID, then create a device-only security key.</Text>
+          <Text style={styles.noticeCopy}>Your phone will ask for fingerprint or Face ID, then register this phone to your picker profile.</Text>
         </View>
 
         <View style={styles.footer}>

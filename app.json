@@ -35,8 +35,7 @@
       [
         "expo-secure-store",
         {
-          "configureAndroidBackup": true,
-          "faceIDPermission": "Use Face ID to unlock this phone's OpsPro device key."
+          "configureAndroidBackup": true
         }
       ],
       [

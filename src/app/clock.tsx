@@ -58,7 +58,7 @@ export default function ClockScreen() {
         lat: position.coords.latitude,
         lng: position.coords.longitude,
         gps_accuracy: position.coords.accuracy,
-        location_mocked: false,
+        location_mocked: false, // a mocked position is refused above, before any request
       });
       await AppIntegrity.prepareIntegrityTokenProviderAsync(GOOGLE_CLOUD_PROJECT_NUMBER);
       const integrityToken = await AppIntegrity.requestIntegrityCheckAsync(challenge.request_hash);

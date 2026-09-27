@@ -4,19 +4,26 @@ Native React Native/Expo app for picker clock-in and clock-out.
 
 ## Security model
 
-- The phone's biometric system stays on-device. OpsPro never receives a face or fingerprint template.
-- Only Android Class 3 biometrics or iOS biometrics are accepted; PIN/passcode fallback is disabled for punch approval.
-- Each picker gets one registered phone with a device-bound signing key.
-- The server issues a short-lived, one-time challenge for every punch.
-- The app signs the exact picker, device, action, location and challenge payload after biometric approval.
-- The existing OpsPro server remains authoritative for device status, roster, open-session state, GPS/geofence rules and clock events.
-- App Attest (iOS) and Play Integrity (Android) must be verified server-side before a device becomes active.
+What is implemented today (Android):
 
-Device biometrics prove that somebody enrolled on the phone approved an action. They do not prove which enrolled person it was. One-person phone control remains an operating requirement.
+- The phone's biometric system stays on-device. OpsPro never receives a face or fingerprint template.
+- The app only proceeds after a Class 3 (strong) biometric prompt, with PIN/passcode fallback disabled. This is enforced by the app itself; the server does not receive proof that the prompt ran.
+- Each picker has one active registered phone. Registration uses a one-time, 15-minute setup code issued by an admin.
+- The phone holds a random install secret in SecureStore. Every request presents it, so it acts as the device credential.
+- Every punch uses a short-lived, single-use server challenge. The exact punch payload (picker device, action, store, GPS) is bound to a Google Play Integrity token that the server verifies: genuine OpsPro build from Play, genuine device, licensed.
+- The server (`opspro-app`) stays authoritative for device status, roster window, open session, geofence and the clock event.
+- Admins can revoke a lost or compromised phone (`POST /api/mobile/devices/revoke`).
+
+Known limits:
+
+- Device biometrics prove that someone enrolled on the phone approved the punch, not which person. Anyone whose fingerprint is added to the phone can punch. One-person phone control is an operating rule, not a technical control.
+- The mock-location flag comes from the phone, so it only catches an unmodified app.
+- Not yet built: a hardware-backed signing key that only unlocks with biometrics (Android Keystore + Key Attestation) and signs each punch. That is what would give the server proof of the biometric approval and of this exact phone.
+- iOS enrollment stays fail-closed until the App Attest verifier ships.
 
 ## Repository split
 
-- This repository: native user interface, device enrollment, biometric gate and hardware-backed signing.
+- This repository: native user interface, device enrollment and the biometric prompt (hardware-backed signing is planned, see above).
 - `opspro-app`: API routes, Supabase migrations, attestation verification, challenge redemption and attendance writes.
 
 ## Current implementation
@@ -25,7 +32,7 @@ Device biometrics prove that somebody enrolled on the phone approved an action. 
 - strong-biometric capability preflight
 - native biometric confirmation with device fallback disabled
 - first-run enrollment-code interface
-- server submission intentionally locked until the atomic backend enrollment and punch endpoints ship
+- enrollment and punch submission wired to the `opspro-app` mobile endpoints
 
 ## Local development
 

@@ -72,7 +72,7 @@ export default function EnrollScreen() {
         </Pressable>
 
         <Text style={styles.title}>Enter your setup code</Text>
-        <Text style={styles.copy}>Enter the 8-digit code you got from your supervisor. It links this phone to you and works once.</Text>
+        <Text style={styles.copy}>Enter the 8-digit code you received from your supervisor. It links this phone to you and works once.</Text>
 
         <Text style={styles.label}>Setup code</Text>
         <TextInput

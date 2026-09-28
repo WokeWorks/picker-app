@@ -88,11 +88,6 @@ export default function EnrollScreen() {
           value={code}
         />
 
-        <View style={styles.notice}>
-          <Icon name="info" size={20} color={C.brand} />
-          <Text style={styles.noticeCopy}>Next, your phone asks for your fingerprint or face. Use the one you'll clock in with. Keep this code private, like a password.</Text>
-        </View>
-
         <View style={styles.footer}>
           <Pressable
             accessibilityRole="button"
@@ -124,8 +119,6 @@ const styles = StyleSheet.create({
     color: C.ink, fontSize: 26, fontWeight: '700', letterSpacing: 4, paddingHorizontal: 18,
   },
   inputComplete: { borderColor: C.brand },
-  notice: { flexDirection: 'row', gap: 12, marginTop: 20, backgroundColor: C.brandTint, borderRadius: 14, padding: 14 },
-  noticeCopy: { flex: 1, color: C.ink, fontSize: 14, lineHeight: 20 },
   footer: { marginTop: 'auto', paddingTop: 24 },
   primary: { minHeight: 58, borderRadius: 14, backgroundColor: C.brand, alignItems: 'center', justifyContent: 'center' },
   primaryDisabled: { backgroundColor: C.line },

@@ -61,6 +61,8 @@ export async function registerForReminders(installSecret: string): Promise<PushS
         name: 'Shift reminders',
         importance: N.AndroidImportance.HIGH,
         vibrationPattern: [0, 250, 250, 250],
+        // Hide store and times on the lock screen; shown once unlocked.
+        lockscreenVisibility: N.AndroidNotificationVisibility.PRIVATE,
       });
     }
 

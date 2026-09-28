@@ -21,8 +21,8 @@ const MESSAGES: Record<string, string> = {
   device_inactive: 'This phone is no longer registered. Ask your admin for a new setup code.',
   employee_inactive: 'Your account is not active. Ask your supervisor.',
   // Setup
-  invalid_code: 'That setup code is not valid. Check it and try again.',
-  expired_code: 'That setup code has expired. Ask your admin for a new one.',
+  invalid_code: 'That setup code is not valid. Check the 8 digits and try again.',
+  expired_code: 'That setup code has expired. Ask your supervisor for a new one.',
   device_already_registered: 'This phone is already registered.',
   replacement_device_changed: 'Your registered phone changed while setting up. Ask your admin for a new code.',
   break_already_taken: "You've already taken your break this shift.",

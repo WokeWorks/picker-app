@@ -20,12 +20,12 @@ import { Icon } from '@/components/Icon';
 import { requestIntegrityToken } from '@/integrity';
 import { friendlyError } from '@/messages';
 import { C } from '@/theme';
-import { apiPost, DEVICE_ID_KEY, encodeAndroidEnrollmentPayload, INSTALL_SECRET_KEY, normalizeEnrollmentCode, sha256 } from '@/native-api';
+import { apiPost, DEVICE_ID_KEY, encodeAndroidEnrollmentPayload, formatEnrollmentCode, INSTALL_SECRET_KEY, normalizeEnrollmentCode, sha256 } from '@/native-api';
 
 export default function EnrollScreen() {
   const [code, setCode] = useState('');
   const [checking, setChecking] = useState(false);
-  const codeComplete = normalizeEnrollmentCode(code).length === 10;
+  const codeComplete = normalizeEnrollmentCode(code).length === 8;
 
   async function verifyBiometric() {
     setChecking(true);
@@ -72,17 +72,17 @@ export default function EnrollScreen() {
         </Pressable>
 
         <Text style={styles.title}>Enter your setup code</Text>
-        <Text style={styles.copy}>Your admin gives you this code. It links this phone to you, works once, and expires after 15 minutes.</Text>
+        <Text style={styles.copy}>Your supervisor sends you an 8-digit code on WhatsApp. It links this phone to you and works once.</Text>
 
         <Text style={styles.label}>Setup code</Text>
         <TextInput
           accessibilityLabel="Setup code"
           autoFocus
-          autoCapitalize="characters"
           autoCorrect={false}
-          maxLength={12}
-          onChangeText={(value) => setCode(value.toUpperCase())}
-          placeholder="OP-XXXX-XXXX"
+          keyboardType="number-pad"
+          maxLength={9}
+          onChangeText={(value) => setCode(formatEnrollmentCode(value))}
+          placeholder="1234 5678"
           placeholderTextColor={C.faint}
           style={[styles.input, codeComplete && styles.inputComplete]}
           value={code}

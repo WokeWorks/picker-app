@@ -9,8 +9,15 @@ export async function sha256(value: string) {
   return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, value);
 }
 
+// Setup codes are 8 digits (shown "1234 5678"); only the digits count.
 export function normalizeEnrollmentCode(value: string) {
-  return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return value.replace(/\D/g, '');
+}
+
+// "12345678" -> "1234 5678" while typing.
+export function formatEnrollmentCode(value: string) {
+  const d = normalizeEnrollmentCode(value).slice(0, 8);
+  return d.length > 4 ? `${d.slice(0, 4)} ${d.slice(4)}` : d;
 }
 
 export function encodeAndroidEnrollmentPayload(input: { codeSha256: string; installIdHash: string; deviceLabel: string }) {

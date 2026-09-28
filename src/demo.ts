@@ -4,14 +4,6 @@
 
 export type DemoState = 'before' | 'on' | 'break' | 'done' | 'none';
 
-export const DEMO_STATES: Array<{ id: DemoState; label: string }> = [
-  { id: 'before', label: 'Before' },
-  { id: 'on', label: 'On shift' },
-  { id: 'break', label: 'Break' },
-  { id: 'done', label: 'Done' },
-  { id: 'none', label: 'No shift' },
-];
-
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 

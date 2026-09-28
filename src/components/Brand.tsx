@@ -1,21 +1,14 @@
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { C } from '@/theme';
 
-// Wordmark used at the top of every screen. `onLongPress` is only wired in the
-// development preview (it brings back the hidden preview switcher).
-export function Brand({ onLongPress }: { onLongPress?: () => void }) {
+// Wordmark used at the top of every screen.
+export function Brand() {
   return (
-    <Pressable
-      style={styles.row}
-      onLongPress={onLongPress}
-      disabled={!onLongPress}
-      accessibilityRole="header"
-      accessibilityLabel="OpsPro Picker"
-    >
+    <View style={styles.row} accessibilityRole="header" accessibilityLabel="OpsPro Picker">
       <Text style={styles.name}>OpsPro</Text>
       <Text style={styles.product}>Picker</Text>
-    </Pressable>
+    </View>
   );
 }
 

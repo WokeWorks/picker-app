@@ -12,7 +12,7 @@ import { Icon } from '@/components/Icon';
 import { ShiftProgress } from '@/components/ShiftProgress';
 import { DonePanel } from '@/components/DonePanel';
 import { EmptyCard, StoreCard } from '@/components/StoreCard';
-import { DEMO_STATES, demoSession, type DemoState } from '@/demo';
+import { demoSession, type DemoState } from '@/demo';
 import { requestIntegrityToken } from '@/integrity';
 import { registerForReminders } from '@/notifications';
 import { friendlyError } from '@/messages';
@@ -45,12 +45,11 @@ export default function ClockScreen() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  // Development-only preview with sample data (src/demo.ts). The switcher can
-  // be hidden to see the real layout; long-press the wordmark to bring it back.
+  // Development-only preview with sample data (src/demo.ts): starts before the
+  // shift, and the buttons move it through clock in, break and clock out.
   const params = useLocalSearchParams<{ demo?: string }>();
   const demo = __DEV__ && params.demo === '1';
   const [demoState, setDemoState] = useState<DemoState>('before');
-  const [demoBar, setDemoBar] = useState(true);
   const bio = useBiometricKind();
 
   const refresh = useCallback(async () => {
@@ -171,7 +170,7 @@ export default function ClockScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} tintColor={C.brand} colors={[C.brand]} />}
       >
         <View style={styles.header}>
-          <Brand onLongPress={demo ? () => setDemoBar(true) : undefined} />
+          <Brand />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Your shift schedule"
@@ -184,24 +183,6 @@ export default function ClockScreen() {
           </Pressable>
         </View>
 
-        {demo && demoBar && (
-          <View style={styles.demoBar}>
-            <View style={styles.demoHead}>
-              <Text style={styles.demoLabel}>Preview with sample data</Text>
-              <Pressable onPress={() => setDemoBar(false)} hitSlop={8}>
-                <Text style={styles.demoHide}>Hide</Text>
-              </Pressable>
-            </View>
-            <View style={styles.demoChips}>
-              {DEMO_STATES.map((s) => (
-                <Pressable key={s.id} onPress={() => setDemoState(s.id)} style={[styles.demoChip, demoState === s.id && styles.demoChipOn]}>
-                  <Text style={[styles.demoChipText, demoState === s.id && styles.demoChipTextOn]}>{s.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <Text style={styles.demoTip}>After hiding, long-press "OpsPro Picker" to bring this back.</Text>
-          </View>
-        )}
 
         <Text style={styles.hello}>Hi {firstName}!</Text>
 
@@ -330,16 +311,6 @@ const styles = StyleSheet.create({
   breakBtnText: { color: C.onOrange, fontSize: 15, fontWeight: '700' },
   secondary: { marginTop: 18, paddingVertical: 8, paddingHorizontal: 12 },
   secondaryText: { color: C.brand, fontSize: 15, fontWeight: '700', textDecorationLine: 'underline' },
-  demoBar: { marginTop: 12, borderWidth: 1, borderStyle: 'dashed', borderColor: C.lineStrong, borderRadius: 12, padding: 10 },
-  demoHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  demoLabel: { color: C.muted, fontSize: 12, fontWeight: '600' },
-  demoHide: { color: C.brand, fontSize: 12, fontWeight: '700' },
-  demoChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  demoChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 99, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line },
-  demoChipOn: { backgroundColor: C.ink, borderColor: C.ink },
-  demoChipText: { color: C.inkMid, fontSize: 12, fontWeight: '600' },
-  demoChipTextOn: { color: C.paper },
-  demoTip: { color: C.faint, fontSize: 11, marginTop: 8 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   scheduleBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8,

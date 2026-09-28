@@ -16,6 +16,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
+import { biometricFailureMessage } from '@/biometric';
 import { Icon } from '@/components/Icon';
 import { requestIntegrityToken } from '@/integrity';
 import { friendlyError } from '@/messages';
@@ -38,7 +39,11 @@ export default function EnrollScreen() {
         requireConfirmation: true,
       });
 
-      if (!result.success) return;
+      if (!result.success) {
+        const why = biometricFailureMessage(result);
+        if (why) Alert.alert('Setup not approved', why);
+        return;
+      }
       if (Platform.OS !== 'android') throw new Error('iPhone setup is not available yet.');
 
       // A fresh install secret on every setup attempt, so a re-registered phone

@@ -6,7 +6,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 
-import { useBiometricKind } from '@/biometric';
+import { biometricFailureMessage, useBiometricKind } from '@/biometric';
 import { Brand } from '@/components/Brand';
 import { Icon } from '@/components/Icon';
 import { ShiftProgress } from '@/components/ShiftProgress';
@@ -85,7 +85,11 @@ export default function ClockScreen() {
         disableDeviceFallback: true,
         requireConfirmation: true,
       });
-      if (!biometric.success) return;
+      if (!biometric.success) {
+        const why = biometricFailureMessage(biometric);
+        if (why) Alert.alert(clockingIn ? 'Clock-in not approved' : 'Clock-out not approved', why);
+        return;
+      }
       setDemoState(clockingIn ? 'on' : 'done');
       return;
     }
@@ -106,7 +110,11 @@ export default function ClockScreen() {
         biometricsSecurityLevel: 'strong',
         requireConfirmation: true,
       });
-      if (!biometric.success) return;
+      if (!biometric.success) {
+        const why = biometricFailureMessage(biometric);
+        if (why) Alert.alert(clockingIn ? 'Clock-in not approved' : 'Clock-out not approved', why);
+        return;
+      }
 
       const challenge = await apiPost<{ payload: string; request_hash: string }>('/api/mobile/punch/challenge', {
         install_secret: installSecret,

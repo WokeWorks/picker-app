@@ -1,5 +1,10 @@
 # OpsPro Picker
 
+> **Handoff:** the full status, decisions, go-live steps and open items are in
+> `MOBILE-HANDOFF.md` on the dashboard repo (`OpsBro-pro-max/app`, branch
+> `mobile/0049-per-day-rules`). v1 is Android only. Build native from outside
+> iCloud-synced folders (Xcode signing fails in `~/Documents`).
+
 Native React Native/Expo app for picker clock-in and clock-out.
 
 ## Security model

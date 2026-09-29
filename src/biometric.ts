@@ -7,17 +7,34 @@ export type BiometricKind = 'face' | 'fingerprint';
 // Face only when the phone has face unlock and no fingerprint sensor (e.g. an
 // iPhone with Face ID); phones with both default to the fingerprint, which is
 // what Android's strong-biometric prompt usually offers first.
-export function useBiometricKind(): BiometricKind {
-  const [kind, setKind] = useState<BiometricKind>('fingerprint');
+//
+// Looked up once per launch and remembered, so later screens show the right
+// icon on their first frame; until the first answer arrives the hook returns
+// null and callers draw nothing rather than a guess (no fingerprint flash).
+let known: BiometricKind | null = null;
+let pending: Promise<BiometricKind> | null = null;
+
+function lookup(): Promise<BiometricKind> {
+  pending ??= LocalAuthentication.supportedAuthenticationTypesAsync()
+    .then((types) => {
+      const face = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
+      const finger = types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
+      return (known = face && !finger ? 'face' : 'fingerprint');
+    })
+    .catch(() => (known = 'fingerprint'));
+  return pending;
+}
+
+// Start as soon as the app loads, so the answer is usually ready before the
+// first screen draws.
+lookup();
+
+export function useBiometricKind(): BiometricKind | null {
+  const [kind, setKind] = useState<BiometricKind | null>(known);
   useEffect(() => {
+    if (known) return;
     let mounted = true;
-    LocalAuthentication.supportedAuthenticationTypesAsync()
-      .then((types) => {
-        const face = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
-        const finger = types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
-        if (mounted) setKind(face && !finger ? 'face' : 'fingerprint');
-      })
-      .catch(() => {});
+    lookup().then((k) => { if (mounted) setKind(k); });
     return () => { mounted = false; };
   }, []);
   return kind;

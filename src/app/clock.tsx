@@ -259,7 +259,7 @@ export default function ClockScreen() {
                 ]}
               >
                 {busy ? <ActivityIndicator color={onShift ? C.brand : C.onBrand} size="large" /> : <>
-                  <Icon name={bio} size={44} color={!canPunch ? C.faint : onShift ? C.brand : C.onBrand} strokeWidth={1.6} />
+                  {bio ? <Icon name={bio} size={44} color={!canPunch ? C.faint : onShift ? C.brand : C.onBrand} strokeWidth={1.6} /> : <View style={{ width: 44, height: 44 }} />}
                   <Text style={[styles.punchMain, onShift && styles.punchMainOut, !canPunch && styles.punchMainDisabled]}>
                     {onShift ? 'Clock out' : 'Clock in'}
                   </Text>
@@ -279,7 +279,7 @@ export default function ClockScreen() {
             ) : onShift ? (
               <Text style={styles.punchHint}>Break taken</Text>
             ) : (
-              <Text style={styles.punchHint}>Tap, then use your {bio === 'face' ? 'face' : 'fingerprint'}</Text>
+              <Text style={styles.punchHint}>{bio ? `Tap, then use your ${bio === 'face' ? 'face' : 'fingerprint'}` : ' '}</Text>
             )}
           </View>
         )}

@@ -79,7 +79,7 @@ export default function HomeScreen() {
 
         <View style={styles.rules}>
           <Rule icon="phone" text="One picker, one phone" />
-          <Rule icon={bio} text={`Your ${bio === 'face' ? 'face' : 'fingerprint'} approves each punch`} />
+          <Rule icon={bio ?? 'fingerprint'} text={`Your ${bio === 'face' ? 'face' : 'fingerprint'} approves each punch`} />
           <Rule icon="pin" text="Your location is checked at every punch" />
         </View>
 

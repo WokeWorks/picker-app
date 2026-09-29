@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
@@ -11,9 +11,7 @@ import { Icon, type IconName } from '@/components/Icon';
 import { C } from '@/theme';
 import { DEVICE_ID_KEY } from '@/native-api';
 
-// v1 is Android only: iPhone registration needs Apple App Attest, planned for a
-// later version. iPhone users clock in at the store kiosk until then.
-type DeviceCheck = 'checking' | 'ready' | 'weak' | 'unavailable' | 'iphone';
+type DeviceCheck = 'checking' | 'ready' | 'weak' | 'unavailable';
 
 export default function HomeScreen() {
   const [deviceCheck, setDeviceCheck] = useState<DeviceCheck>('checking');
@@ -26,10 +24,6 @@ export default function HomeScreen() {
       const enrolledDevice = await SecureStore.getItemAsync(DEVICE_ID_KEY);
       if (enrolledDevice) {
         router.replace('/clock');
-        return;
-      }
-      if (Platform.OS === 'ios') {
-        if (mounted) setDeviceCheck('iphone');
         return;
       }
       const [hardware, enrolled, level] = await Promise.all([
@@ -69,7 +63,7 @@ export default function HomeScreen() {
           <View style={[styles.statusIcon, isReady && styles.statusIconReady]}>
             {deviceCheck === 'checking'
               ? <ActivityIndicator color={C.brand} />
-              : <Icon name={isReady ? 'check' : deviceCheck === 'iphone' ? 'info' : 'alert'} size={22} color={isReady ? C.onBrand : deviceCheck === 'iphone' ? C.brand : C.amber} strokeWidth={2.2} />}
+              : <Icon name={isReady ? 'check' : 'alert'} size={22} color={isReady ? C.onBrand : C.amber} strokeWidth={2.2} />}
           </View>
           <View style={styles.statusCopy}>
             <Text style={styles.statusTitle}>{statusTitle(deviceCheck)}</Text>
@@ -116,7 +110,6 @@ function Rule({ icon, text }: { icon: IconName; text: string }) {
 }
 
 function statusTitle(status: DeviceCheck) {
-  if (status === 'iphone') return 'iPhone support is coming soon';
   if (status === 'checking') return 'Checking this phone…';
   if (status === 'ready') return 'This phone is ready';
   if (status === 'weak') return 'Stronger phone lock needed';
@@ -124,7 +117,6 @@ function statusTitle(status: DeviceCheck) {
 }
 
 function statusDetail(status: DeviceCheck) {
-  if (status === 'iphone') return "For now, clock in at your store's kiosk.";
   if (status === 'checking') return 'This only takes a moment.';
   if (status === 'ready') return 'Fingerprint or face unlock is set up.';
   if (status === 'weak') return 'Set up fingerprint unlock in your phone settings, then come back.';

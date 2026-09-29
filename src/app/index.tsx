@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
@@ -59,17 +59,18 @@ export default function HomeScreen() {
           </Text>
         </View>
 
-        <View style={[styles.status, isReady && styles.statusReady, hasProblem && styles.statusProblem]}>
-          <View style={[styles.statusIcon, isReady && styles.statusIconReady]}>
-            {deviceCheck === 'checking'
-              ? <ActivityIndicator color={C.brand} />
-              : <Icon name={isReady ? 'check' : 'alert'} size={22} color={isReady ? C.onBrand : C.amber} strokeWidth={2.2} />}
+        {/* Only when something needs fixing; a phone that is ready needs no card. */}
+        {hasProblem && (
+          <View style={[styles.status, styles.statusProblem]}>
+            <View style={styles.statusIcon}>
+              <Icon name="alert" size={22} color={C.amber} strokeWidth={2.2} />
+            </View>
+            <View style={styles.statusCopy}>
+              <Text style={styles.statusTitle}>{statusTitle(deviceCheck)}</Text>
+              <Text style={styles.statusDetail}>{statusDetail(deviceCheck)}</Text>
+            </View>
           </View>
-          <View style={styles.statusCopy}>
-            <Text style={styles.statusTitle}>{statusTitle(deviceCheck)}</Text>
-            <Text style={styles.statusDetail}>{statusDetail(deviceCheck)}</Text>
-          </View>
-        </View>
+        )}
 
         <View style={styles.rules}>
           <Rule icon="phone" text="One picker, one phone" />
@@ -133,10 +134,8 @@ const styles = StyleSheet.create({
     marginTop: 28, borderWidth: 1, borderColor: C.line, backgroundColor: C.paper,
     borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14,
   },
-  statusReady: { borderColor: C.brandBorder, backgroundColor: C.brandTint },
   statusProblem: { borderColor: '#FCD34D', backgroundColor: C.amberBg },
   statusIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.paper, alignItems: 'center', justifyContent: 'center' },
-  statusIconReady: { backgroundColor: C.brand },
   statusCopy: { flex: 1 },
   statusTitle: { color: C.ink, fontSize: 16, fontWeight: '700' },
   statusDetail: { color: C.inkMid, fontSize: 14, lineHeight: 20, marginTop: 2 },

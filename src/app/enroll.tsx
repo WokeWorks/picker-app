@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,12 +21,15 @@ import { Icon } from '@/components/Icon';
 import { requestIntegrityToken } from '@/integrity';
 import { friendlyError } from '@/messages';
 import { C } from '@/theme';
-import { apiPost, DEVICE_ID_KEY, encodeAndroidEnrollmentPayload, formatEnrollmentCode, INSTALL_SECRET_KEY, normalizeEnrollmentCode, sha256 } from '@/native-api';
+import { apiPost, DEVICE_ID_KEY, encodeAndroidEnrollmentPayload, formatEnrollmentCode, formatPhone, INSTALL_SECRET_KEY, isUaeMobile, phoneDigits, normalizeEnrollmentCode, sha256 } from '@/native-api';
 
 export default function EnrollScreen() {
+  const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [checking, setChecking] = useState(false);
-  const codeComplete = normalizeEnrollmentCode(code).length === 8;
+  const codeRef = useRef<TextInput>(null);
+  const phoneComplete = isUaeMobile(phone);
+  const codeComplete = normalizeEnrollmentCode(code).length === 8 && phoneComplete;
 
   async function verifyBiometric() {
     setChecking(true);
@@ -56,7 +59,7 @@ export default function EnrollScreen() {
       const requestHash = await sha256(proofPayload);
       const integrityToken = await requestIntegrityToken(requestHash);
       const enrolled = await apiPost<{ device_id: string }>('/api/mobile/enroll', {
-        code, platform: 'android', install_secret: installSecret, device_label: deviceLabel, integrity_token: integrityToken,
+        code, phone: phoneDigits(phone), platform: 'android', install_secret: installSecret, device_label: deviceLabel, integrity_token: integrityToken,
       });
       await SecureStore.setItemAsync(INSTALL_SECRET_KEY, installSecret, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
       await SecureStore.setItemAsync(DEVICE_ID_KEY, enrolled.device_id, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
@@ -76,20 +79,39 @@ export default function EnrollScreen() {
           <Text style={styles.backText}>Back</Text>
         </Pressable>
 
-        <Text style={styles.title}>Enter your setup code</Text>
-        <Text style={styles.copy}>Enter the 8-digit code you received from your supervisor. It links this phone to you and works once.</Text>
+        <Text style={styles.title}>Confirm it's you</Text>
+        <Text style={styles.copy}>Enter your mobile number and the 8-digit code you received from your supervisor. This links this phone to you.</Text>
+
+        <Text style={styles.label}>Mobile number</Text>
+        <TextInput
+          accessibilityLabel="Mobile number"
+          autoFocus
+          autoComplete="tel"
+          textContentType="telephoneNumber"
+          keyboardType="phone-pad"
+          maxLength={12}
+          onChangeText={(value) => {
+            const next = formatPhone(value);
+            setPhone(next);
+            if (isUaeMobile(next)) codeRef.current?.focus();
+          }}
+          placeholder="050 123 4567"
+          placeholderTextColor={C.faint}
+          style={[styles.input, phoneComplete && styles.inputComplete]}
+          value={phone}
+        />
 
         <Text style={styles.label}>Setup code</Text>
         <TextInput
+          ref={codeRef}
           accessibilityLabel="Setup code"
-          autoFocus
           autoCorrect={false}
           keyboardType="number-pad"
           maxLength={9}
           onChangeText={(value) => setCode(formatEnrollmentCode(value))}
           placeholder="1234 5678"
           placeholderTextColor={C.faint}
-          style={[styles.input, codeComplete && styles.inputComplete]}
+          style={[styles.input, normalizeEnrollmentCode(code).length === 8 && styles.inputComplete]}
           value={code}
         />
 
@@ -118,7 +140,7 @@ const styles = StyleSheet.create({
   backText: { color: C.brand, fontSize: 16, fontWeight: '600' },
   title: { color: C.ink, fontSize: 30, lineHeight: 36, fontWeight: '800', letterSpacing: -0.7, marginTop: 20 },
   copy: { color: C.inkMid, fontSize: 16, lineHeight: 24, marginTop: 10 },
-  label: { color: C.inkMid, fontSize: 14, fontWeight: '600', marginTop: 32, marginBottom: 8 },
+  label: { color: C.inkMid, fontSize: 14, fontWeight: '600', marginTop: 24, marginBottom: 8 },
   input: {
     height: 68, borderWidth: 1.5, borderColor: C.lineStrong, borderRadius: 14, backgroundColor: C.paper,
     color: C.ink, fontSize: 26, fontWeight: '700', letterSpacing: 4, paddingHorizontal: 18,

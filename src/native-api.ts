@@ -14,6 +14,24 @@ export function normalizeEnrollmentCode(value: string) {
   return value.replace(/\D/g, '');
 }
 
+// UAE mobile as typed: "050 123 4567". Accepts a leading +971 / 971 too; the
+// server normalises and compares it with the number on the picker's profile.
+export function phoneDigits(value: string) {
+  let d = value.replace(/\D/g, '');
+  if (d.startsWith('00')) d = d.slice(2);
+  if (d.startsWith('971')) d = '0' + d.slice(3);
+  return d.slice(0, 10);
+}
+export function formatPhone(value: string) {
+  const d = phoneDigits(value);
+  if (d.length <= 3) return d;
+  if (d.length <= 6) return `${d.slice(0, 3)} ${d.slice(3)}`;
+  return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+}
+export function isUaeMobile(value: string) {
+  return /^05\d{8}$/.test(phoneDigits(value));
+}
+
 // "12345678" -> "1234 5678" while typing.
 export function formatEnrollmentCode(value: string) {
   const d = normalizeEnrollmentCode(value).slice(0, 8);

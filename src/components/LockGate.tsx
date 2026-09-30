@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, AppState, type AppStateStatus, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
@@ -30,7 +30,6 @@ type Phase =
 export function LockGate({ children }: { children: React.ReactNode }) {
   const [phase, setPhase] = useState<Phase>('deciding');
   const [message, setMessage] = useState<string | null>(null);
-  const guarded = useRef(false);   // is this phone registered, i.e. does the gate apply
   const bio = useBiometricKind();
 
   const unlock = useCallback(async () => {
@@ -51,13 +50,14 @@ export function LockGate({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Decide once, on mount, whether this phone is gated at all.
+  // Decide on mount whether this phone is gated, and show the lock if it is.
+  // Deliberately NOT cached for later use: the foreground handler below reads the
+  // registration again each time. See the comment there.
   useEffect(() => {
     let mounted = true;
     SecureStore.getItemAsync(DEVICE_ID_KEY)
       .then((deviceId) => {
         if (!mounted) return;
-        guarded.current = !!deviceId;
         if (!deviceId) {
           setPhase('open');
           return;
@@ -77,20 +77,42 @@ export function LockGate({ children }: { children: React.ReactNode }) {
 
   // Re-lock when the app comes back from the background after the grace period.
   useEffect(() => {
-    function onChange(next: AppStateStatus) {
-      if (!guarded.current) return;
-      // Critical: the native biometric sheet itself makes the app go
-      // inactive/background. Without this guard the listener re-locks the app
-      // the moment it asks to be unlocked, and prompts forever.
+    let cancelled = false;
+
+    async function onChange(next: AppStateStatus) {
+      // Cheap synchronous rejections first, before any await. Critical: the
+      // native biometric sheet itself makes the app go inactive/background.
+      // Without this guard the listener re-locks the app the moment it asks to
+      // be unlocked, and prompts forever.
       if (isPrompting()) return;
       if (next !== 'active') return;
       if (isUnlocked()) return;
+
+      // Read the registration FRESH every time, rather than caching what the
+      // mount effect found. A phone that enrols during this session started out
+      // unregistered, so a cached "not gated" would mean the lock never appears
+      // again until the app is killed -- and that is the one session where it
+      // matters most, because the phone has just become able to punch.
+      let registered = false;
+      try {
+        registered = !!(await SecureStore.getItemAsync(DEVICE_ID_KEY));
+      } catch {
+        // Same reasoning as on mount: fail open rather than trap the picker
+        // behind a lock screen. The punch routes are the real authority.
+        return;
+      }
+      if (cancelled || !registered) return;
+      // Re-check after the await: the picker may have unlocked, or a prompt may
+      // have started, while SecureStore was being read.
+      if (isPrompting() || isUnlocked()) return;
+
       markLocked();
       setPhase('locked');
       void unlock();
     }
-    const sub = AppState.addEventListener('change', onChange);
-    return () => sub.remove();
+
+    const sub = AppState.addEventListener('change', (next) => { void onChange(next); });
+    return () => { cancelled = true; sub.remove(); };
   }, [unlock]);
 
   const locked = phase === 'locked' || phase === 'deciding';

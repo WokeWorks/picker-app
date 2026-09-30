@@ -52,17 +52,41 @@ export function setupNotifications(onOpen: (screen: string) => void): () => void
 }
 
 /**
- * The notification tap that launched the app, if it was launched by one.
+ * The screen a notification tap LAUNCHED the app for, consumed once.
  *
- * Re-exported through the same lazy accessor as everything else here, so a build
- * without the native module (Expo Go) returns undefined rather than crashing at
- * import time.
+ * A tap that starts the app from cold is never delivered to the listener in
+ * setupNotifications() -- the app was not running to receive it -- so without
+ * this the push lands on whatever screen the app opens by default instead of
+ * what it was about.
+ *
+ * Two things this deliberately does:
+ *
+ * 1. It CLEARS the response after reading it. The OS caches the last tap, so
+ *    leaving it in place means the next ordinary launch replays it and throws
+ *    the picker onto a screen they did not ask for, possibly days later.
+ * 2. It is a plain async function, not the useLastNotificationResponse hook.
+ *    The hook resolves whenever React gets round to it, which raced the
+ *    startup redirect on the home screen: the deep link pushed /week, then the
+ *    redirect replaced it with /clock, and the tap was silently discarded.
+ *    Reading it as one step of the startup sequence removes the race instead
+ *    of trying to win it.
+ *
+ * Returns null when the app was opened normally, when the tap carries no screen
+ * worth opening, or when the native module is missing (Expo Go).
  */
-export function useLastNotificationResponse() {
+export async function takeLaunchScreen(): Promise<string | null> {
   const N = notifications();
-  // eslint-disable-next-line react-hooks/rules-of-hooks -- N is stable for the
-  // lifetime of the app: it is the module or it is null, decided at first call.
-  return N ? N.useLastNotificationResponse() : undefined;
+  if (!N) return null;
+  try {
+    const response = await N.getLastNotificationResponseAsync();
+    if (!response) return null;
+    await N.clearLastNotificationResponseAsync();
+    const screen = response.notification.request.content.data?.screen;
+    return screen === 'week' || screen === 'notifications' ? String(screen) : null;
+  } catch {
+    // A launch-screen read is never worth failing a startup over.
+    return null;
+  }
 }
 
 export type PushSetup = 'registered' | 'denied' | 'unavailable';

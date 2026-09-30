@@ -96,6 +96,20 @@ export function SelfieSheet({
       }
       onCapture(photo.uri);
     } catch {
+      // Surfaces as a tap that did nothing. The picker can simply tap again,
+      // which is a better answer than an alert explaining a camera fault they
+      // cannot do anything about.
+    } finally {
+      // The reset lives in a finally so that EVERY exit path clears it --
+      // success, failure, and anything added later. That is the whole bug this
+      // replaces: the reset used to exist only on the error path, so a
+      // successful clock-IN left busy stuck true and the shutter was dead for
+      // the clock-OUT. A picker could clock in and then not clock out without
+      // force-closing the app.
+      //
+      // This sheet stays MOUNTED between punches, so state left behind here is
+      // state the next punch inherits -- which is why the fix has to be here
+      // rather than relying on the component being torn down.
       setBusy(false);
     }
   }, [busy, onCapture]);

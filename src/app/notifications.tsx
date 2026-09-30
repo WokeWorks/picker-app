@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
@@ -71,6 +71,15 @@ export default function NotificationsScreen() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selecting = selected.size > 0;
 
+  // Pull-to-refresh and load-more both write the same array, and they could
+  // interleave: a load-more that started before a refresh would append its page
+  // onto a list that no longer existed, so rows appeared twice and the paging
+  // anchor pointed into a gap in the middle of the list. Every refresh takes a
+  // new generation; a request that started under an older one throws its page
+  // away instead of merging it into a list it never saw.
+  const generation = useRef(0);
+  const refreshing = useRef(false);
+
   const load = useCallback(async (anchor: Anchor = null) => {
     const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
     if (!secret) throw new Error('device_inactive');
@@ -87,17 +96,24 @@ export default function NotificationsScreen() {
       : null;
 
   const refresh = useCallback(async () => {
+    const gen = ++generation.current;
+    refreshing.current = true;
     try {
       const page = await load(null);
+      if (gen !== generation.current) return;
       // Cleared here rather than at the top: setting state synchronously inside
       // an effect triggers a cascading render, and this runs from one on mount.
       setError(null);
       setNotes(page.notifications);
       setNext(anchorOf(page));
     } catch (e) {
+      if (gen !== generation.current) return;
       setError(friendlyError(e));
     } finally {
-      setLoading(false);
+      if (gen === generation.current) {
+        refreshing.current = false;
+        setLoading(false);
+      }
     }
   }, [load]);
 
@@ -106,11 +122,22 @@ export default function NotificationsScreen() {
   // Anchored paging: ask for what is older than the last row held, never "page 3".
   // New notifications arriving at the top cannot shift this and cause a repeat.
   const loadMore = useCallback(async () => {
-    if (!next || loadingMore) return;
+    // Refusing to start during a refresh as well as the generation check: the
+    // whole list is about to be replaced, so a page fetched against the old
+    // anchor is wasted work at best.
+    if (!next || loadingMore || refreshing.current) return;
+    const gen = generation.current;
     setLoadingMore(true);
     try {
       const page = await load(next);
-      setNotes((prev) => [...prev, ...page.notifications]);
+      if (gen !== generation.current) return;
+      setNotes((prev) => {
+        // A row can cross the page boundary between the two calls, so append
+        // only what is not already held -- a duplicate here is a duplicate React
+        // key, not just a repeated row.
+        const held = new Set(prev.map((n) => n.id));
+        return [...prev, ...page.notifications.filter((n) => !held.has(n.id))];
+      });
       setNext(anchorOf(page));
     } catch {
       // Silent: they still have everything already loaded, and an alert on scroll

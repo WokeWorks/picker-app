@@ -10,6 +10,7 @@ import { Brand } from '@/components/Brand';
 import { Icon, type IconName } from '@/components/Icon';
 import { C } from '@/theme';
 import { DEVICE_ID_KEY } from '@/native-api';
+import { takeLaunchScreen } from '@/notifications';
 
 // 'unlocked' = the phone has no screen lock at all. That is the ONLY thing that
 // stops a phone being set up.
@@ -31,7 +32,17 @@ export default function HomeScreen() {
     async function checkDevice() {
       const enrolledDevice = await SecureStore.getItemAsync(DEVICE_ID_KEY);
       if (enrolledDevice) {
+        // The cold-start deep link is resolved HERE, in sequence, rather than in
+        // the root layout. Both used to navigate: the layout pushed the screen
+        // the push was about, this replaced it with /clock a moment later, and
+        // tapping a roster notification from cold silently landed on the clock
+        // screen. Doing it in order means /clock is the screen behind, so Back
+        // still works, and there is no race to lose.
+        const launchScreen = await takeLaunchScreen();
+        if (!mounted) return;
         router.replace('/clock');
+        if (launchScreen === 'week') router.push('/week');
+        else if (launchScreen === 'notifications') router.push('/notifications');
         return;
       }
       // SecurityLevel.NONE means no PIN, pattern, password or biometric — an

@@ -337,6 +337,11 @@ export default function ClockScreen() {
         )}
 
       </ScrollView>
+      {/* Stays mounted and driven by `visible`, rather than being conditionally
+          rendered. RN's Modal keeps itself rendered after visible goes false
+          purely so it can animate out, so unmounting it here would take the
+          dismiss animation with it. Capture state is reset on every exit path
+          inside the sheet instead -- see the finally in SelfieSheet.take(). */}
       <SelfieSheet
         visible={selfieOpen}
         // The sheet can only be open because punch() opened it, and punch()

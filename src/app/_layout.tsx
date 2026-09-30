@@ -1,10 +1,10 @@
 import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { LockGate } from '@/components/LockGate';
-import { ensureNotificationChannels, setupNotifications, useLastNotificationResponse } from '@/notifications';
+import { ensureNotificationChannels, setupNotifications } from '@/notifications';
 import { C } from '@/theme';
 
 export default function RootLayout() {
@@ -18,20 +18,10 @@ export default function RootLayout() {
   // channel that does not exist may not be shown at all.
   useEffect(() => { void ensureNotificationChannels(); }, []);
 
-  // A tap that LAUNCHES the app from cold is not delivered to the listener below —
-  // the app was not running to receive it. Expo keeps the last response for
-  // exactly this, and without reading it the push lands on the home screen
-  // instead of what it was about.
-  const launchedBy = useLastNotificationResponse();
-  const handledLaunch = useRef(false);
-  useEffect(() => {
-    if (handledLaunch.current || !launchedBy) return;
-    handledLaunch.current = true;
-    const screen = launchedBy.notification.request.content.data?.screen;
-    if (screen === 'week') router.push('/week');
-    else if (screen === 'notifications') router.push('/notifications');
-  }, [launchedBy]);
-
+  // A tap that LAUNCHES the app from cold is handled by the home screen, not
+  // here, because it has to happen AFTER the startup redirect to /clock -- see
+  // takeLaunchScreen() in src/notifications.ts. This listener only sees taps
+  // that arrive while the app is already running.
   useEffect(() => setupNotifications((screen) => {
     if (screen === 'week') router.push('/week');
     else if (screen === 'notifications') router.push('/notifications');

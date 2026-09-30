@@ -1,4 +1,5 @@
 import * as Crypto from 'expo-crypto';
+import { File } from 'expo-file-system';
 
 export const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://app.opspro.ae').replace(/\/$/, '');
 export const GOOGLE_CLOUD_PROJECT_NUMBER = process.env.EXPO_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER || '';
@@ -40,6 +41,37 @@ export function formatEnrollmentCode(value: string) {
 
 export function encodeAndroidEnrollmentPayload(input: { codeSha256: string; installIdHash: string; deviceLabel: string }) {
   return JSON.stringify([1, 'android_enrollment', input.codeSha256, input.installIdHash, input.deviceLabel]);
+}
+
+/**
+ * Multipart POST, for a punch that carries the selfie.
+ *
+ * Takes the photo's `file://` uri and wraps it in expo-file-system's `File`,
+ * which implements Blob and so is a real FormData part.
+ *
+ * NOT `{ uri, name, type }`. That was React Native's own convention for years and
+ * it is what this function used first -- but RN 0.86 / SDK 57 follow the web
+ * standard, where a part must be a string or a Blob, and anything else throws
+ * "Unsupported FormDataPart implementation" at request time. TypeScript cannot
+ * catch it, because making that object type-check at all needs a cast to Blob,
+ * and the cast is the lie.
+ *
+ * `fetch` sets the multipart boundary itself from the FormData body. Setting
+ * 'content-type' by hand here would omit the boundary and the server would parse
+ * nothing -- the other common way this call goes wrong.
+ */
+export async function apiPostFile<T>(
+  path: string,
+  fields: Record<string, string>,
+  fileUri: string,
+): Promise<T> {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) form.append(k, v);
+  form.append('file', new File(fileUri));
+  const response = await fetch(`${API_BASE_URL}${path}`, { method: 'POST', body: form });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
+  return result as T;
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {

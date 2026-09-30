@@ -1,23 +1,22 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as LocalAuthentication from 'expo-local-authentication';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 
-import { biometricFailureMessage, useBiometricKind } from '@/biometric';
 import { Brand } from '@/components/Brand';
 import { Icon } from '@/components/Icon';
 import { ShiftProgress } from '@/components/ShiftProgress';
 import { DonePanel } from '@/components/DonePanel';
 import { EmptyCard, StoreCard } from '@/components/StoreCard';
 import { demoSession, type DemoState } from '@/demo';
+import { SelfieSheet } from '@/components/SelfieSheet';
 import { requestIntegrityToken } from '@/integrity';
 import { registerForReminders } from '@/notifications';
 import { friendlyError } from '@/messages';
 import { C } from '@/theme';
-import { apiPost, INSTALL_SECRET_KEY } from '@/native-api';
+import { apiPost, apiPostFile, INSTALL_SECRET_KEY } from '@/native-api';
 
 type Store = { name: string; chain?: string | null; area?: string | null; lat: number | null; lng: number | null };
 
@@ -50,7 +49,6 @@ export default function ClockScreen() {
   const params = useLocalSearchParams<{ demo?: string }>();
   const demo = __DEV__ && params.demo === '1';
   const [demoState, setDemoState] = useState<DemoState>('before');
-  const bio = useBiometricKind();
 
   const refresh = useCallback(async () => {
     if (demo) { setSession(demoSession(demoState)); return; }
@@ -75,21 +73,38 @@ export default function ClockScreen() {
     });
   }, [demo]);
 
+  // Opens the camera and resolves with the photo, or null if they backed out.
+  // Kept as a promise so punch() stays a straight line instead of a state machine
+  // spread across callbacks.
+  const selfieResolver = useRef<((uri: string | null) => void) | null>(null);
+  const [selfieOpen, setSelfieOpen] = useState(false);
+
+  function askForSelfie(): Promise<string | null> {
+    return new Promise((resolve) => {
+      selfieResolver.current = resolve;
+      setSelfieOpen(true);
+    });
+  }
+
+  function finishSelfie(uri: string | null) {
+    setSelfieOpen(false);
+    selfieResolver.current?.(uri);
+    selfieResolver.current = null;
+  }
+
   async function punch() {
     if (!session || session.locations.length !== 1) return;
     const clockingIn = session.action === 'clock_in';
+
+    // NO fingerprint prompt here any more. It used to be the only identity check
+    // in the punch path; the photo replaces it, and is far stronger — the
+    // fingerprint only ever proved "somebody enrolled on this phone", whereas the
+    // server compares the face to the picker's reference photo. The fingerprint
+    // now guards OPENING the app (src/lock.ts), which is where it earns its keep.
+    // Two prompts, each doing something the other cannot.
     if (demo) {
-      const biometric = await LocalAuthentication.authenticateAsync({
-        promptMessage: clockingIn ? 'Approve clock-in' : 'Approve clock-out',
-        promptSubtitle: session.locations[0].name,
-        disableDeviceFallback: true,
-        requireConfirmation: true,
-      });
-      if (!biometric.success) {
-        const why = biometricFailureMessage(biometric);
-        if (why) Alert.alert(clockingIn ? 'Clock-in not approved' : 'Clock-out not approved', why);
-        return;
-      }
+      const shot = await askForSelfie();
+      if (!shot) return;
       setDemoState(clockingIn ? 'on' : 'done');
       return;
     }
@@ -103,18 +118,11 @@ export default function ClockScreen() {
       if (position.mocked === true) throw new Error('mock_location_detected');
       if ((position.coords.accuracy ?? Infinity) > 100) throw new Error('poor_gps_accuracy');
 
-      const biometric = await LocalAuthentication.authenticateAsync({
-        promptMessage: clockingIn ? 'Approve clock-in' : 'Approve clock-out',
-        promptSubtitle: session.locations[0].name,
-        disableDeviceFallback: true,
-        biometricsSecurityLevel: 'strong',
-        requireConfirmation: true,
-      });
-      if (!biometric.success) {
-        const why = biometricFailureMessage(biometric);
-        if (why) Alert.alert(clockingIn ? 'Clock-in not approved' : 'Clock-out not approved', why);
-        return;
-      }
+      // Location is checked BEFORE the camera on purpose: being told to move
+      // closer to the store after posing for a photo is a worse experience than
+      // being told before.
+      const selfieUri = await askForSelfie();
+      if (!selfieUri) return;
 
       const challenge = await apiPost<{ payload: string; request_hash: string }>('/api/mobile/punch/challenge', {
         install_secret: installSecret,
@@ -126,7 +134,11 @@ export default function ClockScreen() {
         location_mocked: false, // a mocked position is refused above, before any request
       });
       const integrityToken = await requestIntegrityToken(challenge.request_hash);
-      await apiPost('/api/mobile/punch/commit', { install_secret: installSecret, payload: challenge.payload, integrity_token: integrityToken });
+      await apiPostFile('/api/mobile/punch/commit', {
+        install_secret: installSecret,
+        payload: challenge.payload,
+        integrity_token: integrityToken,
+      }, selfieUri);
       await refresh();
     } catch (error) {
       Alert.alert(clockingIn ? 'Clock-in failed' : 'Clock-out failed', friendlyError(error));
@@ -259,7 +271,10 @@ export default function ClockScreen() {
                 ]}
               >
                 {busy ? <ActivityIndicator color={onShift ? C.brand : C.onBrand} size="large" /> : <>
-                  {bio ? <Icon name={bio} size={44} color={!canPunch ? C.faint : onShift ? C.brand : C.onBrand} strokeWidth={1.6} /> : <View style={{ width: 44, height: 44 }} />}
+                  {/* A camera, not a fingerprint: the punch now asks for a photo.
+                      Promising a fingerprint here would be a lie about what the
+                      next tap does. */}
+                  <Icon name="face" size={44} color={!canPunch ? C.faint : onShift ? C.brand : C.onBrand} strokeWidth={1.6} />
                   <Text style={[styles.punchMain, onShift && styles.punchMainOut, !canPunch && styles.punchMainDisabled]}>
                     {onShift ? 'Clock out' : 'Clock in'}
                   </Text>
@@ -279,12 +294,20 @@ export default function ClockScreen() {
             ) : onShift ? (
               <Text style={styles.punchHint}>Break taken</Text>
             ) : (
-              <Text style={styles.punchHint}>{bio ? `Tap, then use your ${bio === 'face' ? 'face' : 'fingerprint'}` : ' '}</Text>
+              <Text style={styles.punchHint}>Tap, then take a photo of your face</Text>
             )}
           </View>
         )}
 
       </ScrollView>
+      <SelfieSheet
+        visible={selfieOpen}
+        // The sheet can only be open because punch() opened it, and punch()
+        // returns early without a session -- but nothing in the types says so.
+        action={session?.action === 'clock_out' ? 'clock_out' : 'clock_in'}
+        onCapture={(uri) => finishSelfie(uri)}
+        onCancel={() => finishSelfie(null)}
+      />
     </SafeAreaView>
   );
 }

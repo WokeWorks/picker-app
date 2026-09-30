@@ -1,7 +1,7 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
-import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, AppState, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
@@ -49,13 +49,27 @@ export function SelfieSheet({
   onCapture: (uri: string) => void;
   onCancel: () => void;
 }) {
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
   const camera = useRef<CameraView>(null);
+  /**
+   * Which open of the sheet a capture belongs to. Bumped whenever the sheet is
+   * closed without a photo.
+   *
+   * Capturing and resizing takes long enough to cancel during, and the parent
+   * hands each open a fresh one-shot resolver. So a capture that finished after
+   * a cancel used to land on the resolver belonging to the NEXT punch: tap
+   * shutter, cancel, punch again quickly, and the photo from the abandoned
+   * attempt was uploaded as the new punch's selfie. Hand the phone over between
+   * the two and that is one picker's face submitted for another's clock-in, which
+   * the server only flags after the fact rather than refusing.
+   */
+  const attempt = useRef(0);
 
   const take = useCallback(async () => {
     if (!camera.current || busy) return;
+    const mine = attempt.current;
     setBusy(true);
     try {
       const photo = await camera.current.takePictureAsync({
@@ -91,9 +105,13 @@ export function SelfieSheet({
         context.resize(portrait ? { height: MAX_UPLOAD_SIDE } : { width: MAX_UPLOAD_SIDE });
         const rendered = await context.renderAsync();
         const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: UPLOAD_QUALITY });
+        // Checked as late as possible, immediately before handing the photo over:
+        // everything above is awaited, so the cancel can land at any point in it.
+        if (mine !== attempt.current) return;
         onCapture(saved.uri);
         return;
       }
+      if (mine !== attempt.current) return;
       onCapture(photo.uri);
     } catch {
       // Surfaces as a tap that did nothing. The picker can simply tap again,
@@ -110,16 +128,54 @@ export function SelfieSheet({
       // This sheet stays MOUNTED between punches, so state left behind here is
       // state the next punch inherits -- which is why the fix has to be here
       // rather than relying on the component being torn down.
-      setBusy(false);
+      //
+      // Scoped to the live attempt, because busy is SHARED and a cancelled
+      // capture can outlive the punch it belonged to: cancel mid-capture, punch
+      // again, and the abandoned capture landing would otherwise clear the
+      // spinner while the new photo was still being taken. The picker sees a
+      // shutter that looks idle mid-capture, taps again, and two captures race
+      // for one punch.
+      //
+      // This cannot strand busy at true: an attempt only becomes stale via
+      // close(), which resets busy itself.
+      if (mine === attempt.current) setBusy(false);
     }
   }, [busy, onCapture]);
 
-  // Reset for the next open, so a retake never shows a stale spinner.
+  // Abandons whatever capture is in flight, so its photo can never be delivered
+  // to the next punch, and clears the spinner so a retake does not open onto one.
+  //
+  // `ready` is deliberately NOT reset here -- see CameraStage.
   const close = useCallback(() => {
+    attempt.current += 1;
     setBusy(false);
-    setReady(false);
     onCancel();
   }, [onCancel]);
+
+  const markReady = useCallback(() => setReady(true), []);
+  const markGone = useCallback(() => setReady(false), []);
+
+  /**
+   * Re-read the camera permission whenever the app comes back to the foreground
+   * while this sheet is open and still blocked.
+   *
+   * Without this, sending the picker to the system settings page is a dead end:
+   * useCameraPermissions only reads the status when the component that calls it
+   * MOUNTS, and this sheet stays mounted for the whole life of the clock screen.
+   * So a picker who turns the camera back on and returns still sees "camera
+   * access was turned off", and no amount of cancelling and re-punching changes
+   * it -- only force-quitting the app does.
+   *
+   * Listening only while blocked and open keeps this off the normal punch path
+   * entirely.
+   */
+  useEffect(() => {
+    if (!visible || permission?.granted) return;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') void getPermission();
+    });
+    return () => sub.remove();
+  }, [visible, permission?.granted, getPermission]);
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={close} statusBarTranslucent>
@@ -130,15 +186,24 @@ export function SelfieSheet({
           <View style={styles.centre}>
             <Icon name="alert" size={40} color={C.onBrand} strokeWidth={2} />
             <Text style={styles.askTitle}>Camera access is needed</Text>
+            {/* Once canAskAgain is false the OS will never show the prompt again,
+                so requestPermission() returns denied without displaying anything.
+                Offering "Allow camera" there is a button that cannot work, and it
+                leaves the picker unable to punch at all with no way out -- the
+                only route back is the system settings page. */}
             <Text style={styles.askCopy}>
-              A photo of your face is taken each time you clock in or out, so your hours are recorded as yours.
+              {permission.canAskAgain
+                ? 'A photo of your face is taken each time you clock in or out, so your hours are recorded as yours.'
+                : 'Camera access was turned off for this app. Turn it back on in your phone settings and come straight back here — you cannot clock in or out until you do.'}
             </Text>
             <Pressable
               accessibilityRole="button"
-              onPress={() => void requestPermission()}
+              onPress={() => void (permission.canAskAgain ? requestPermission() : Linking.openSettings())}
               style={({ pressed }) => [styles.primary, pressed && styles.primaryPressed]}
             >
-              <Text style={styles.primaryText}>Allow camera</Text>
+              <Text style={styles.primaryText}>
+                {permission.canAskAgain ? 'Allow camera' : 'Open phone settings'}
+              </Text>
             </Pressable>
             <Pressable accessibilityRole="button" onPress={close} hitSlop={8}>
               <Text style={styles.cancel}>Cancel</Text>
@@ -146,16 +211,7 @@ export function SelfieSheet({
           </View>
         ) : (
           <>
-            <CameraView
-              ref={camera}
-              style={styles.camera}
-              facing="front"
-              // A mirrored preview is what people expect of a front camera; without
-              // it, moving to centre yourself feels backwards. SDK 57: this is a
-              // prop, the old takePictureAsync option is deprecated.
-              mirror
-              onCameraReady={() => setReady(true)}
-            />
+            <CameraStage cameraRef={camera} onReady={markReady} onGone={markGone} />
             <View style={styles.overlay} pointerEvents="box-none">
               <Text style={styles.hint} accessibilityRole="header">
                 {action === 'clock_in' ? 'Photo to clock in' : 'Photo to clock out'}
@@ -187,6 +243,46 @@ export function SelfieSheet({
         )}
       </SafeAreaView>
     </Modal>
+  );
+}
+
+/**
+ * The camera preview, which reports when it is ready AND when it goes away.
+ *
+ * `ready` has to follow the camera's MOUNT rather than the sheet's visibility,
+ * because those are not the same thing: RN's Modal unmounts its children on
+ * Android when `visible` goes false, but KEEPS them mounted on iOS so it can
+ * animate out (`_shouldShowModal`/`isRendered` in Libraries/Modal/Modal.js).
+ *
+ * Resetting `ready` on close was therefore right on Android and wrong on iOS,
+ * where onCameraReady never fires a second time -- so the shutter stayed
+ * disabled for good and the picker could not punch at all. Letting the camera's
+ * own unmount clear the flag is correct on both, with no platform check to get
+ * out of step with a future RN change.
+ */
+function CameraStage({
+  cameraRef,
+  onReady,
+  onGone,
+}: {
+  cameraRef: React.RefObject<CameraView | null>;
+  onReady: () => void;
+  onGone: () => void;
+}) {
+  // The cleanup IS the whole point: it runs when this component unmounts, which
+  // is exactly when the camera stops being ready.
+  useEffect(() => onGone, [onGone]);
+  return (
+    <CameraView
+      ref={cameraRef}
+      style={styles.camera}
+      facing="front"
+      // A mirrored preview is what people expect of a front camera; without it,
+      // moving to centre yourself feels backwards. SDK 57: this is a prop, the
+      // old takePictureAsync option is deprecated.
+      mirror
+      onCameraReady={onReady}
+    />
   );
 }
 

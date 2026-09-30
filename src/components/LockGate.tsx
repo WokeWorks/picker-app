@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, type AppStateStatus, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
@@ -31,6 +31,14 @@ export function LockGate({ children }: { children: React.ReactNode }) {
   const [phase, setPhase] = useState<Phase>('deciding');
   const [message, setMessage] = useState<string | null>(null);
   const bio = useBiometricKind();
+  /**
+   * The last registration state that was actually READ successfully.
+   *
+   * Used only as the answer to "I don't know" when a later read throws -- never to
+   * skip the read, which was the bug this whole gate had: a flag decided once on
+   * mount meant a phone enrolling mid-session was never gated again.
+   */
+  const lastKnownRegistered = useRef(false);
 
   const unlock = useCallback(async () => {
     setMessage(null);
@@ -58,6 +66,7 @@ export function LockGate({ children }: { children: React.ReactNode }) {
     SecureStore.getItemAsync(DEVICE_ID_KEY)
       .then((deviceId) => {
         if (!mounted) return;
+        lastKnownRegistered.current = !!deviceId;
         if (!deviceId) {
           setPhase('open');
           return;
@@ -93,13 +102,23 @@ export function LockGate({ children }: { children: React.ReactNode }) {
       // unregistered, so a cached "not gated" would mean the lock never appears
       // again until the app is killed -- and that is the one session where it
       // matters most, because the phone has just become able to punch.
-      let registered = false;
+      let registered: boolean;
       try {
         registered = !!(await SecureStore.getItemAsync(DEVICE_ID_KEY));
+        lastKnownRegistered.current = registered;
       } catch {
-        // Same reasoning as on mount: fail open rather than trap the picker
-        // behind a lock screen. The punch routes are the real authority.
-        return;
+        // A read that THREW is "I don't know", not "not registered". Collapsing
+        // those two into one branch meant a single unreadable keystore left the
+        // app open for the rest of the run: every foreground after it skipped the
+        // lock silently, with nothing to notice and no retry.
+        //
+        // This matters more than the "convenience gate" framing suggests. The
+        // server flags a bad face match but does NOT refuse the punch (founder
+        // decision, see api/mobile/punch/commit/route.ts), so whoever holds an
+        // unlocked phone can complete a real punch that is only reviewed after
+        // the fact. That makes this lock preventive, not cosmetic, so an unknown
+        // answer stays locked.
+        registered = lastKnownRegistered.current;
       }
       if (cancelled || !registered) return;
       // Re-check after the await: the picker may have unlocked, or a prompt may

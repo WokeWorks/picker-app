@@ -11,7 +11,15 @@ import { Icon, type IconName } from '@/components/Icon';
 import { C } from '@/theme';
 import { DEVICE_ID_KEY } from '@/native-api';
 
-type DeviceCheck = 'checking' | 'ready' | 'weak' | 'unavailable';
+// 'unlocked' = the phone has no screen lock at all. That is the ONLY thing that
+// stops a phone being set up.
+//
+// It used to also refuse any phone without a STRONG biometric, which made sense
+// when the fingerprint was the identity proof on every punch. It is not any more:
+// the server compares a selfie to the picker's reference photo, and that is what
+// proves who is punching. Refusing a perfectly secure phone because its sensor is
+// weak or absent turned away pickers for a check the system no longer relies on.
+type DeviceCheck = 'checking' | 'ready' | 'unlocked';
 
 export default function HomeScreen() {
   const [deviceCheck, setDeviceCheck] = useState<DeviceCheck>('checking');
@@ -26,26 +34,23 @@ export default function HomeScreen() {
         router.replace('/clock');
         return;
       }
-      const [hardware, enrolled, level] = await Promise.all([
-        LocalAuthentication.hasHardwareAsync(),
-        LocalAuthentication.isEnrolledAsync(),
-        LocalAuthentication.getEnrolledLevelAsync(),
-      ]);
-
+      // SecurityLevel.NONE means no PIN, pattern, password or biometric — an
+      // entirely unlocked phone. Anything above it (SECRET = PIN/pattern/password,
+      // or either biometric level) is enough: whichever it is becomes the
+      // credential the app asks for when it opens.
+      const level = await LocalAuthentication.getEnrolledLevelAsync();
       if (!mounted) return;
-      if (!hardware || !enrolled) setDeviceCheck('unavailable');
-      else if (level !== LocalAuthentication.SecurityLevel.BIOMETRIC_STRONG) setDeviceCheck('weak');
-      else setDeviceCheck('ready');
+      setDeviceCheck(level === LocalAuthentication.SecurityLevel.NONE ? 'unlocked' : 'ready');
     }
 
-    checkDevice().catch(() => mounted && setDeviceCheck('unavailable'));
+    checkDevice().catch(() => mounted && setDeviceCheck('unlocked'));
     return () => {
       mounted = false;
     };
   }, []);
 
   const isReady = deviceCheck === 'ready';
-  const hasProblem = deviceCheck === 'weak' || deviceCheck === 'unavailable';
+  const hasProblem = deviceCheck === 'unlocked';
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -55,7 +60,7 @@ export default function HomeScreen() {
         <View style={styles.hero}>
           <Text style={styles.title}>Set up this phone for clocking in</Text>
           <Text style={styles.copy}>
-            You'll approve every clock-in and clock-out with your fingerprint or face. Your fingerprint and face never leave this phone.
+            You'll take a photo of your face each time you clock in or out. Opening the app uses your fingerprint, face or phone passcode — whichever this phone has.
           </Text>
         </View>
 
@@ -113,15 +118,13 @@ function Rule({ icon, text }: { icon: IconName; text: string }) {
 function statusTitle(status: DeviceCheck) {
   if (status === 'checking') return 'Checking this phone…';
   if (status === 'ready') return 'This phone is ready';
-  if (status === 'weak') return 'Stronger phone lock needed';
-  return 'Fingerprint or face unlock is off';
+  return 'This phone has no screen lock';
 }
 
 function statusDetail(status: DeviceCheck) {
   if (status === 'checking') return 'This only takes a moment.';
-  if (status === 'ready') return 'Fingerprint or face unlock is set up.';
-  if (status === 'weak') return 'Set up fingerprint unlock in your phone settings, then come back.';
-  return 'Turn on fingerprint or face unlock in your phone settings, then come back.';
+  if (status === 'ready') return 'Your phone lock will be used to open the app.';
+  return 'Set a PIN, pattern or password in your phone settings, then come back. A fingerprint or face is optional — it just makes opening the app quicker.';
 }
 
 const styles = StyleSheet.create({

@@ -47,8 +47,11 @@ const SILENT = new Set(['user_cancel', 'system_cancel', 'app_cancel']);
 export function biometricFailureMessage(result: { success: boolean; error?: string }): string | null {
   if (result.success || !result.error || SILENT.has(result.error)) return null;
   switch (result.error) {
-    case 'not_enrolled': return 'Set up fingerprint or face unlock in your phone settings, then try again.';
-    case 'lockout': return 'Too many tries. Unlock your phone with its passcode, then try again.';
+    case 'not_enrolled': return 'No fingerprint or face unlock is set up on this phone. Use your phone passcode, or set one up in Settings.';
+    // The lock screen now offers a passcode button when this fires, so the
+    // message points at that rather than sending them out of the app.
+    case 'lockout':
+    case 'lockout_permanent': return 'Too many tries. Use your phone passcode instead.';
     case 'not_available':
     case 'missing_usage_description': return "This version of the app can't use Face ID or fingerprint. Ask your supervisor.";
     default: return "Your fingerprint or face wasn't confirmed. Try again.";

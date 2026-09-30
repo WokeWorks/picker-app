@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -64,6 +64,23 @@ export default function ClockScreen() {
 
   useEffect(reload, [reload]);
 
+  // Re-read every time this screen is focused, not just on mount: coming back from
+  // the inbox after reading everything used to leave the badge showing the old
+  // count until the next reload.
+  const refreshBadge = useCallback(() => {
+    if (demo) return;
+    let mounted = true;
+    SecureStore.getItemAsync(INSTALL_SECRET_KEY)
+      .then((secret) => (secret
+        ? apiPost<{ unread: number }>('/api/mobile/notifications', { install_secret: secret, before: null })
+        : null))
+      .then((r) => { if (mounted && r) setUnread(r.unread); })
+      .catch(() => { /* the badge is not worth an error in front of a picker */ });
+    return () => { mounted = false; };
+  }, [demo]);
+
+  useFocusEffect(refreshBadge);
+
   // Once per launch on a registered phone: ask for notification permission and
   // register for shift reminders. Not in the preview (no real phone behind it).
   useEffect(() => {
@@ -78,6 +95,10 @@ export default function ClockScreen() {
   // spread across callbacks.
   const selfieResolver = useRef<((uri: string | null) => void) | null>(null);
   const [selfieOpen, setSelfieOpen] = useState(false);
+  // Unread badge. Its own small request rather than part of the session payload,
+  // so a notifications outage can never stop the clock screen loading — the thing
+  // pickers actually need it for.
+  const [unread, setUnread] = useState(0);
 
   function askForSelfie(): Promise<string | null> {
     return new Promise((resolve) => {
@@ -200,6 +221,22 @@ export default function ClockScreen() {
           >
             <Icon name="calendar" size={17} color={C.brand} strokeWidth={2} />
             <Text style={styles.scheduleText}>Schedule</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={unread ? `Notifications, ${unread} unread` : 'Notifications'}
+            onPress={() => router.push('/notifications')}
+            style={({ pressed }) => [styles.bellBtn, pressed && { backgroundColor: C.pressed }]}
+            hitSlop={6}
+          >
+            <Icon name="alert" size={18} color={C.brand} strokeWidth={2} />
+            {unread > 0 && (
+              <View style={styles.badge}>
+                {/* Past 9 the exact number stops mattering and starts breaking
+                    the circle, which is the usual convention for a reason. */}
+                <Text style={styles.badgeText}>{unread > 9 ? '9+' : unread}</Text>
+              </View>
+            )}
           </Pressable>
         </View>
 
@@ -343,6 +380,16 @@ const styles = StyleSheet.create({
   secondary: { marginTop: 18, paddingVertical: 8, paddingHorizontal: 12 },
   secondaryText: { color: C.brand, fontSize: 15, fontWeight: '700', textDecorationLine: 'underline' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  bellBtn: {
+    width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: C.line, backgroundColor: C.paper,
+  },
+  badge: {
+    position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, borderRadius: 9,
+    paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.danger, borderWidth: 2, borderColor: C.canvas,
+  },
+  badgeText: { color: C.onBrand, fontSize: 10, fontWeight: '800' },
   scheduleBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8,
     borderRadius: 99, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line,

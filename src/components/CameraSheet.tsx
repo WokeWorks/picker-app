@@ -1,34 +1,26 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
+import { MAX_UPLOAD_SIDE, UPLOAD_QUALITY, resizeForUpload } from '@/image';
 import { C } from '@/theme';
 
-// Longest side of the photo we upload, and its JPEG quality. Both deliberately
-// identical to the web kiosk's LiveCameraCapture in the dashboard repo, and kept
-// in step with MAX_DECODE_SIDE (1600) in src/lib/face-server.ts, which enforces a
-// looser ceiling server-side because this runs on a device we do not control.
-//
-// The reasoning is measured, not guessed (from the kiosk's own comment): a phone
-// camera hands back 4032x3024, and sending that full size costs twice over -- a
-// far bigger upload on shop mobile data, and a 139MB tensor on the server, where
-// ten arriving together measured 2760MB against a 2048MB instance and killed it,
-// taking everyone punching at that moment with it. It buys nothing: the detector
-// resizes the image itself before looking, finding the same face at 0.99
-// confidence at every size from 640 up, and was FASTER small.
-//
-// At 1080/0.9 a selfie lands in the low hundreds of KB, so the route's 3MB cap is
-// never the thing that stops a punch.
-const MAX_UPLOAD_SIDE = 1080;
-const UPLOAD_QUALITY = 0.9;
+// The upload size limits and the resize itself live in src/image.ts, shared with
+// the gallery path so the two cannot drift apart.
 
 /**
- * Full-screen front camera for the punch selfie.
+ * Full-screen camera, used for the punch selfie and for photographing documents.
  *
- * The photo is the identity proof. The phone deliberately does NOT look at it —
+ * One component rather than two, deliberately. The capture flow here has been
+ * wrong three separate ways -- a busy flag that only reset on the error path, a
+ * `ready` flag reset on close that never came back, and a cancelled capture
+ * delivered to the next punch -- and a second copy would be a second place for all
+ * three to come back. Everything that varies is a prop.
+ *
+ * For a punch, the photo is the identity proof. The phone deliberately does NOT
+ * look at it —
  * no face detection, no descriptor, no "is this you?" decision happens here. It
  * captures pixels and uploads them; the server measures the face with the same
  * code the wall kiosk uses. Anything this app concluded about the face would be
@@ -38,18 +30,65 @@ const UPLOAD_QUALITY = 0.9;
  * blinks and motion blur, and every unusable photo becomes a failed punch the
  * picker has to understand and repeat.
  */
-export function SelfieSheet({
+export function CameraSheet({
   visible,
   action,
+  title,
+  subtitle,
+  facing: initialFacing = 'front',
+  mirror,
+  maxSide = MAX_UPLOAD_SIDE,
+  quality = UPLOAD_QUALITY,
   onCapture,
   onCancel,
 }: {
   visible: boolean;
-  action: 'clock_in' | 'clock_out';
+  /** Which punch this is for. Only used to pick the default heading. */
+  action?: 'clock_in' | 'clock_out';
+  /**
+   * Overrides the heading, so the same camera can be used for something that is
+   * not a punch -- the profile screen's reference photo. Additive and optional on
+   * purpose: the punch path passes neither and behaves exactly as before.
+   */
+  title?: string;
+  subtitle?: string;
+  /**
+   * Which camera to OPEN with. The picker can switch once it is open.
+   *
+   * 'front' for a face, 'back' for a document held in front of the phone.
+   */
+  facing?: 'front' | 'back';
+  /**
+   * Mirrored preview. Right for a face -- moving to centre yourself feels
+   * backwards otherwise -- and WRONG for a document, where it would reverse the
+   * writing the picker is trying to line up.
+   *
+   * Left undefined it follows whichever camera is CURRENTLY selected, so flipping
+   * to the back camera stops mirroring by itself. Pass a boolean only to pin it.
+   */
+  mirror?: boolean;
+  /**
+   * Longest side of the uploaded image.
+   *
+   * 1080 for a face, matching the kiosk and the server's own limits. A DOCUMENT
+   * needs more than that: the server does not measure it, a human reads it, and
+   * passport text at 1080 across a full page is not reliably legible. Callers
+   * photographing documents pass a larger number.
+   */
+  maxSide?: number;
+  quality?: number;
   onCapture: (uri: string) => void;
   onCancel: () => void;
 }) {
   const [permission, requestPermission, getPermission] = useCameraPermissions();
+  /**
+   * The camera in use. Starts at `facing` and can be flipped from the overlay.
+   *
+   * Asked for because a cracked or failing front camera otherwise leaves a picker
+   * unable to punch at all -- the back camera is a worse selfie and an available
+   * one, and the server only cares that it can find a face.
+   */
+  const [facing, setFacing] = useState(initialFacing);
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
   const camera = useRef<CameraView>(null);
@@ -92,27 +131,18 @@ export function SelfieSheet({
       });
       if (!photo?.uri) throw new Error('no uri');
 
-      // Scale the longest side down before it is uploaded. A full-resolution
-      // capture off a modern phone is several MB, which the server would refuse
-      // outright and then have to downscale anyway.
-      const longest = Math.max(photo.width || 0, photo.height || 0);
-      if (longest > MAX_UPLOAD_SIDE) {
-        const portrait = (photo.height || 0) >= (photo.width || 0);
-        const context = ImageManipulator.manipulate(photo.uri);
-        // Only ONE dimension is given, so the other is derived and the aspect
-        // ratio is preserved. Squashing a face would change the very distances the
-        // server measures.
-        context.resize(portrait ? { height: MAX_UPLOAD_SIDE } : { width: MAX_UPLOAD_SIDE });
-        const rendered = await context.renderAsync();
-        const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: UPLOAD_QUALITY });
-        // Checked as late as possible, immediately before handing the photo over:
-        // everything above is awaited, so the cancel can land at any point in it.
-        if (mine !== attempt.current) return;
-        onCapture(saved.uri);
-        return;
-      }
+      // One call, shared with the gallery path. Returns the original uri
+      // untouched when it is already small enough.
+      const uri = await resizeForUpload(photo.uri, {
+        maxSide,
+        quality,
+        width: photo.width,
+        height: photo.height,
+      });
+      // Checked as late as possible, immediately before handing the photo over:
+      // the resize above is awaited, so a cancel can land during it.
       if (mine !== attempt.current) return;
-      onCapture(photo.uri);
+      onCapture(uri);
     } catch {
       // Surfaces as a tap that did nothing. The picker can simply tap again,
       // which is a better answer than an alert explaining a camera fault they
@@ -140,12 +170,29 @@ export function SelfieSheet({
       // close(), which resets busy itself.
       if (mine === attempt.current) setBusy(false);
     }
-  }, [busy, onCapture]);
+  }, [busy, onCapture, maxSide, quality]);
 
   // Abandons whatever capture is in flight, so its photo can never be delivered
   // to the next punch, and clears the spinner so a retake does not open onto one.
   //
   // `ready` is deliberately NOT reset here -- see CameraStage.
+  // Reopening starts from the caller's choice again rather than remembering the
+  // last flip: the sheet stays mounted between uses, so without this a picker who
+  // flipped to the back camera once would find every later punch opening on it.
+  //
+  // Keyed on `visible` rather than called from close(), because close() is only
+  // the CANCEL path. A successful capture goes through onCapture, so resetting
+  // there alone left a flipped camera in place for every punch after a successful
+  // one -- which is most of them.
+  // Derived during render, the pattern React documents for state that follows a
+  // prop. Doing it in an effect is a synchronous setState there, which cascades a
+  // render -- and would also show one frame of the old camera on reopen.
+  const [lastVisible, setLastVisible] = useState(visible);
+  if (lastVisible !== visible) {
+    setLastVisible(visible);
+    if (!visible) setFacing(initialFacing);
+  }
+
   const close = useCallback(() => {
     attempt.current += 1;
     setBusy(false);
@@ -211,12 +258,25 @@ export function SelfieSheet({
           </View>
         ) : (
           <>
-            <CameraStage cameraRef={camera} onReady={markReady} onGone={markGone} />
+            {/* key={facing} forces a REMOUNT on a flip, which is what keeps
+                `ready` honest: CameraStage's unmount clears it and the new
+                camera's onCameraReady sets it again. Without the key the prop
+                would change on a mounted view, onCameraReady would never fire a
+                second time, and the shutter would stay enabled over a camera that
+                is not yet live. */}
+            <CameraStage
+              key={facing}
+              cameraRef={camera}
+              facing={facing}
+              mirror={mirror ?? facing === 'front'}
+              onReady={markReady}
+              onGone={markGone}
+            />
             <View style={styles.overlay} pointerEvents="box-none">
               <Text style={styles.hint} accessibilityRole="header">
-                {action === 'clock_in' ? 'Photo to clock in' : 'Photo to clock out'}
+                {title ?? (action === 'clock_out' ? 'Photo to clock out' : 'Photo to clock in')}
               </Text>
-              <Text style={styles.sub}>Face the camera in good light, then tap.</Text>
+              <Text style={styles.sub}>{subtitle ?? 'Face the camera in good light, then tap.'}</Text>
               <View style={styles.actions}>
                 <Pressable accessibilityRole="button" accessibilityLabel="Cancel" onPress={close} hitSlop={10}>
                   <Text style={styles.cancel}>Cancel</Text>
@@ -235,8 +295,18 @@ export function SelfieSheet({
                 >
                   {busy ? <ActivityIndicator color={C.brand} /> : <View style={styles.shutterDot} />}
                 </Pressable>
-                {/* Balances the row so the shutter sits centred. */}
-                <Text style={[styles.cancel, styles.invisible]}>Cancel</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={facing === 'front' ? 'Use the back camera' : 'Use the front camera'}
+                  // Disabled mid-capture: flipping while takePictureAsync is in
+                  // flight tears down the camera it is reading from.
+                  disabled={busy}
+                  onPress={() => setFacing((f) => (f === 'front' ? 'back' : 'front'))}
+                  hitSlop={10}
+                  style={({ pressed }) => [styles.flip, pressed && styles.flipPressed, busy && styles.flipDisabled]}
+                >
+                  <Icon name="flipCamera" size={22} color={C.onBrand} strokeWidth={2} />
+                </Pressable>
               </View>
             </View>
           </>
@@ -262,10 +332,14 @@ export function SelfieSheet({
  */
 function CameraStage({
   cameraRef,
+  facing,
+  mirror,
   onReady,
   onGone,
 }: {
   cameraRef: React.RefObject<CameraView | null>;
+  facing: 'front' | 'back';
+  mirror: boolean;
   onReady: () => void;
   onGone: () => void;
 }) {
@@ -276,11 +350,9 @@ function CameraStage({
     <CameraView
       ref={cameraRef}
       style={styles.camera}
-      facing="front"
-      // A mirrored preview is what people expect of a front camera; without it,
-      // moving to centre yourself feels backwards. SDK 57: this is a prop, the
-      // old takePictureAsync option is deprecated.
-      mirror
+      facing={facing}
+      // SDK 57: mirror is a PROP. The old takePictureAsync option is deprecated.
+      mirror={mirror}
       onCameraReady={onReady}
     />
   );
@@ -310,5 +382,12 @@ const styles = StyleSheet.create({
   shutterDisabled: { opacity: 0.45 },
   shutterDot: { width: 56, height: 56, borderRadius: 28, backgroundColor: C.brand },
   cancel: { color: C.onBrand, fontSize: 16, fontWeight: '600' },
-  invisible: { opacity: 0 },
+  // Sized to roughly match the Cancel label it sits opposite, so the shutter
+  // stays centred without needing an invisible spacer.
+  flip: {
+    width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  flipPressed: { backgroundColor: 'rgba(255,255,255,0.3)' },
+  flipDisabled: { opacity: 0.4 },
 });

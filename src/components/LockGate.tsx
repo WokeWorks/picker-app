@@ -6,7 +6,7 @@ import * as SecureStore from 'expo-secure-store';
 import { biometricFailureMessage, useBiometricKind } from '@/biometric';
 import { Brand } from '@/components/Brand';
 import { Icon } from '@/components/Icon';
-import { isPrompting, isUnlocked, markLocked, requestUnlock } from '@/lock';
+import { hasBeenAway, isPrompting, isUnlocked, markLeft, markLocked, markReturned, requestUnlock } from '@/lock';
 import { DEVICE_ID_KEY } from '@/native-api';
 import { C } from '@/theme';
 
@@ -84,45 +84,78 @@ export function LockGate({ children }: { children: React.ReactNode }) {
     return () => { mounted = false; };
   }, [unlock]);
 
-  // Re-lock when the app comes back from the background after the grace period.
+  // The cover's own state, readable from the AppState handler without making the
+  // effect depend on it. Used to answer one question: is the lock ALREADY up?
+  //
+  // Written in an effect rather than during render: assigning to a ref while
+  // rendering is what the react-hooks rule objects to, and it is the kind of
+  // thing that stops being true under concurrent rendering.
+  const phaseRef = useRef(phase);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+  // Re-lock when the app comes back from the BACKGROUND after the grace period.
   useEffect(() => {
     let cancelled = false;
 
     async function onChange(next: AppStateStatus) {
-      // Cheap synchronous rejections first, before any await. Critical: the
-      // native biometric sheet itself makes the app go inactive/background.
-      // Without this guard the listener re-locks the app the moment it asks to
-      // be unlocked, and prompts forever.
-      if (isPrompting()) return;
+      if (next === 'background') {
+        // Starts the grace clock, and deliberately runs even while a prompt is on
+        // screen: a prompt that backgrounds the app and then SUCCEEDS clears this
+        // anyway, while one that is cancelled leaves it set, which is correct --
+        // the app really is away. Skipping it here was how a Home press landing
+        // on a successful unlock left the app unlocked indefinitely.
+        markLeft();
+        return;
+      }
       if (next !== 'active') return;
-      if (isUnlocked()) return;
 
-      // Read the registration FRESH every time, rather than caching what the
-      // mount effect found. A phone that enrols during this session started out
-      // unregistered, so a cached "not gated" would mean the lock never appears
-      // again until the app is killed -- and that is the one session where it
-      // matters most, because the phone has just become able to punch.
+      // The native biometric sheet backgrounds the app itself. Without this the
+      // listener re-locks the instant it asks to unlock, and prompts forever.
+      if (isPrompting()) return;
+
+      // ALREADY locked: the cover is up and the picker has a Try again button.
+      // Without this, cancelling a prompt on any Android that pauses the activity
+      // re-locked and re-prompted the moment the activity resumed -- so the
+      // cancel button could never be used. The isPrompting guard above does not
+      // catch it, because by then the prompt has already resolved.
+      if (phaseRef.current === 'locked') return;
+
+      // Nothing to judge: the app never actually went away. This replaces
+      // tracking the previous AppState, which was redundant -- leftAt already
+      // records a real absence, and deriving it from the state machine would have
+      // forgiven a genuine one on any platform that inserted 'inactive' on the
+      // way back.
+      if (!hasBeenAway()) return;
+
+      if (isUnlocked()) {
+        // Inside the grace. Stop the clock so this trip is not charged again.
+        markReturned();
+        return;
+      }
+
+      // Read the registration FRESH rather than caching what the mount effect
+      // found. A phone that enrols during this session started out unregistered,
+      // so a cached "not gated" would mean the lock never appears again until the
+      // app is killed -- the one session where it matters most, because the phone
+      // has just become able to punch.
       let registered: boolean;
       try {
         registered = !!(await SecureStore.getItemAsync(DEVICE_ID_KEY));
         lastKnownRegistered.current = registered;
       } catch {
-        // A read that THREW is "I don't know", not "not registered". Collapsing
-        // those two into one branch meant a single unreadable keystore left the
-        // app open for the rest of the run: every foreground after it skipped the
-        // lock silently, with nothing to notice and no retry.
-        //
-        // This matters more than the "convenience gate" framing suggests. The
-        // server flags a bad face match but does NOT refuse the punch (founder
-        // decision, see api/mobile/punch/commit/route.ts), so whoever holds an
-        // unlocked phone can complete a real punch that is only reviewed after
-        // the fact. That makes this lock preventive, not cosmetic, so an unknown
-        // answer stays locked.
+        // A read that THREW is "I don't know", not "not registered". Fall back to
+        // what was last known: a phone we have seen registered stays gated.
         registered = lastKnownRegistered.current;
       }
-      if (cancelled || !registered) return;
-      // Re-check after the await: the picker may have unlocked, or a prompt may
-      // have started, while SecureStore was being read.
+      if (cancelled || !registered) {
+        markReturned();
+        return;
+      }
+      // Re-checked after the await: the picker may have unlocked, or a prompt may
+      // have started, while SecureStore was being read. The phase is deliberately
+      // NOT re-checked -- it was checked above and only this function sets it to
+      // 'locked', so a second test is dead code that TypeScript correctly refuses
+      // to believe.
       if (isPrompting() || isUnlocked()) return;
 
       markLocked();

@@ -60,6 +60,14 @@ export function encodeAndroidEnrollmentPayload(input: { codeSha256: string; inst
  * 'content-type' by hand here would omit the boundary and the server would parse
  * nothing -- the other common way this call goes wrong.
  */
+/**
+ * How long an upload may take before it is abandoned.
+ *
+ * Generous, because this is a photo over shop mobile data and a picker who is
+ * told to retry too early simply uploads it twice.
+ */
+const UPLOAD_TIMEOUT_MS = 45_000;
+
 export async function apiPostFile<T>(
   path: string,
   fields: Record<string, string>,
@@ -68,7 +76,25 @@ export async function apiPostFile<T>(
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) form.append(k, v);
   form.append('file', new File(fileUri));
-  const response = await fetch(`${API_BASE_URL}${path}`, { method: 'POST', body: form });
+  // React Native's fetch has NO default timeout on Android, so a stalled upload on
+  // shop mobile data never settles: the spinner runs forever, Send and Choose
+  // again stay disabled, and the full-screen preview hides the way back. A
+  // picker's only escape was the hardware back button.
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), UPLOAD_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { method: 'POST', body: form, signal: abort.signal });
+  } catch (err) {
+    // An abort is a timeout, and saying so is the difference between trying again
+    // somewhere with signal and trying the same spot twice more.
+    if ((err as { name?: string })?.name === 'AbortError') {
+      throw new Error('That took too long to send. Check your connection and try again.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
   return result as T;

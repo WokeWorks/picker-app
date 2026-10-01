@@ -15,21 +15,68 @@
 //
 // So: local convenience gate. Real identity proof lives on the server.
 
+import { AppState } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 
-// How long the app stays unlocked after going to the background. Long enough to
-// glance at a WhatsApp message or check the store name without re-scanning;
-// short enough that a phone left on a shelf re-locks on its own.
+// How long the app may stay AWAY before it re-locks. Long enough to glance at a
+// WhatsApp message or check the store name without re-scanning; short enough that
+// a phone left on a shelf re-locks on its own.
 export const UNLOCK_GRACE_MS = 2 * 60 * 1000;
 
 // Module-level, not React state, so it survives screen changes and remounts
-// within a single app run. It is deliberately NOT persisted: a cold start always
-// asks again, and nothing about the lock is written to disk.
-let unlockedAt: number | null = null;
+// within a single app run. Deliberately NOT persisted: a cold start always asks
+// again, and nothing about the lock is written to disk.
+//
+// `unlocked` is a FLAG, not a timestamp, and that is the fix for a real bug. It
+// used to be the moment of the last unlock, with the grace measured from there --
+// so the grace quietly expired while the picker was still using the app, and the
+// next trivial interruption locked them out mid-task. The longer they stayed, the
+// more certain that became, which is the opposite of what a grace period is for.
+//
+// The clock now starts when the app LEAVES. Time spent using the app does not
+// count against it, because it never should have.
+let unlocked = false;
+let leftAt: number | null = null;
 let inFlight: Promise<LocalAuthentication.LocalAuthenticationResult> | null = null;
 
+/**
+ * Still unlocked: either in use, or away for less than the grace period.
+ *
+ * `leftAt === null` means the app has not been backgrounded since the unlock, so
+ * no time counts against it however long they have been on screen.
+ */
 export function isUnlocked(): boolean {
-  return unlockedAt !== null && Date.now() - unlockedAt < UNLOCK_GRACE_MS;
+  if (!unlocked) return false;
+  if (leftAt === null) return true;
+  return Date.now() - leftAt < UNLOCK_GRACE_MS;
+}
+
+/**
+ * The app has gone to the background. Starts the grace clock.
+ *
+ * Only a real 'background' calls this. Android never emits 'inactive' at all
+ * (AppStateModule.kt emits active/background from onHostResume/onHostPause), and
+ * on iOS 'inactive' is the transient state a notification shade or a Face ID
+ * sheet produces -- neither is the picker leaving.
+ */
+export function markLeft(): void {
+  if (leftAt === null) leftAt = Date.now();
+}
+
+/**
+ * Whether the app has actually been away since the last unlock or return.
+ *
+ * This, not a remembered previous AppState, is what says "they really left".
+ * Deriving it from the state machine was fragile: a platform that ever sent
+ * background -> inactive -> active would have forgiven a genuine absence.
+ */
+export function hasBeenAway(): boolean {
+  return leftAt !== null;
+}
+
+/** Back on screen. Stops the grace clock without granting anything. */
+export function markReturned(): void {
+  leftAt = null;
 }
 
 /**
@@ -43,7 +90,8 @@ export function isPrompting(): boolean {
 }
 
 export function markLocked(): void {
-  unlockedAt = null;
+  unlocked = false;
+  leftAt = null;
 }
 
 export async function requestUnlock(): Promise<LocalAuthentication.LocalAuthenticationResult> {
@@ -79,7 +127,15 @@ export async function requestUnlock(): Promise<LocalAuthentication.LocalAuthenti
     requireConfirmation: false,
   })
     .then((result) => {
-      if (result.success) unlockedAt = Date.now();
+      if (result.success) {
+        unlocked = true;
+        // Normally cleared -- the time away has just been paid for by the scan.
+        // But if the app is ALREADY backgrounded as this resolves (they pressed
+        // Home just as Face ID succeeded), the clock has to start now, or the
+        // grace would never begin and the app would still be unlocked hours
+        // later with nothing able to re-lock it.
+        leftAt = AppState.currentState === 'background' ? Date.now() : null;
+      }
       return result;
     })
     .finally(() => {

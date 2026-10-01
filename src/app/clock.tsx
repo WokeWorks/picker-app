@@ -11,7 +11,7 @@ import { ShiftProgress } from '@/components/ShiftProgress';
 import { DonePanel } from '@/components/DonePanel';
 import { EmptyCard, StoreCard } from '@/components/StoreCard';
 import { demoSession, type DemoState } from '@/demo';
-import { SelfieSheet } from '@/components/SelfieSheet';
+import { CameraSheet } from '@/components/CameraSheet';
 import { requestIntegrityToken } from '@/integrity';
 import { registerForReminders } from '@/notifications';
 import { friendlyError } from '@/messages';
@@ -238,6 +238,15 @@ export default function ClockScreen() {
               </View>
             )}
           </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Your details and documents"
+            onPress={() => router.push('/profile')}
+            style={({ pressed }) => [styles.bellBtn, pressed && { backgroundColor: C.pressed }]}
+            hitSlop={6}
+          >
+            <Icon name="person" size={18} color={C.brand} strokeWidth={2} />
+          </Pressable>
         </View>
 
 
@@ -341,8 +350,8 @@ export default function ClockScreen() {
           rendered. RN's Modal keeps itself rendered after visible goes false
           purely so it can animate out, so unmounting it here would take the
           dismiss animation with it. Capture state is reset on every exit path
-          inside the sheet instead -- see the finally in SelfieSheet.take(). */}
-      <SelfieSheet
+          inside the sheet instead -- see the finally in CameraSheet.take(). */}
+      <CameraSheet
         visible={selfieOpen}
         // The sheet can only be open because punch() opened it, and punch()
         // returns early without a session -- but nothing in the types says so.

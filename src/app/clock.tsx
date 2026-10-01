@@ -1,23 +1,22 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as LocalAuthentication from 'expo-local-authentication';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 
-import { biometricFailureMessage, useBiometricKind } from '@/biometric';
 import { Brand } from '@/components/Brand';
 import { Icon } from '@/components/Icon';
 import { ShiftProgress } from '@/components/ShiftProgress';
 import { DonePanel } from '@/components/DonePanel';
 import { EmptyCard, StoreCard } from '@/components/StoreCard';
 import { demoSession, type DemoState } from '@/demo';
+import { SelfieSheet } from '@/components/SelfieSheet';
 import { requestIntegrityToken } from '@/integrity';
 import { registerForReminders } from '@/notifications';
 import { friendlyError } from '@/messages';
 import { C } from '@/theme';
-import { apiPost, INSTALL_SECRET_KEY } from '@/native-api';
+import { apiPost, apiPostFile, INSTALL_SECRET_KEY } from '@/native-api';
 
 type Store = { name: string; chain?: string | null; area?: string | null; lat: number | null; lng: number | null };
 
@@ -50,7 +49,6 @@ export default function ClockScreen() {
   const params = useLocalSearchParams<{ demo?: string }>();
   const demo = __DEV__ && params.demo === '1';
   const [demoState, setDemoState] = useState<DemoState>('before');
-  const bio = useBiometricKind();
 
   const refresh = useCallback(async () => {
     if (demo) { setSession(demoSession(demoState)); return; }
@@ -66,6 +64,23 @@ export default function ClockScreen() {
 
   useEffect(reload, [reload]);
 
+  // Re-read every time this screen is focused, not just on mount: coming back from
+  // the inbox after reading everything used to leave the badge showing the old
+  // count until the next reload.
+  const refreshBadge = useCallback(() => {
+    if (demo) return;
+    let mounted = true;
+    SecureStore.getItemAsync(INSTALL_SECRET_KEY)
+      .then((secret) => (secret
+        ? apiPost<{ unread: number }>('/api/mobile/notifications', { install_secret: secret, before: null })
+        : null))
+      .then((r) => { if (mounted && r) setUnread(r.unread); })
+      .catch(() => { /* the badge is not worth an error in front of a picker */ });
+    return () => { mounted = false; };
+  }, [demo]);
+
+  useFocusEffect(refreshBadge);
+
   // Once per launch on a registered phone: ask for notification permission and
   // register for shift reminders. Not in the preview (no real phone behind it).
   useEffect(() => {
@@ -75,21 +90,42 @@ export default function ClockScreen() {
     });
   }, [demo]);
 
+  // Opens the camera and resolves with the photo, or null if they backed out.
+  // Kept as a promise so punch() stays a straight line instead of a state machine
+  // spread across callbacks.
+  const selfieResolver = useRef<((uri: string | null) => void) | null>(null);
+  const [selfieOpen, setSelfieOpen] = useState(false);
+  // Unread badge. Its own small request rather than part of the session payload,
+  // so a notifications outage can never stop the clock screen loading — the thing
+  // pickers actually need it for.
+  const [unread, setUnread] = useState(0);
+
+  function askForSelfie(): Promise<string | null> {
+    return new Promise((resolve) => {
+      selfieResolver.current = resolve;
+      setSelfieOpen(true);
+    });
+  }
+
+  function finishSelfie(uri: string | null) {
+    setSelfieOpen(false);
+    selfieResolver.current?.(uri);
+    selfieResolver.current = null;
+  }
+
   async function punch() {
     if (!session || session.locations.length !== 1) return;
     const clockingIn = session.action === 'clock_in';
+
+    // NO fingerprint prompt here any more. It used to be the only identity check
+    // in the punch path; the photo replaces it, and is far stronger — the
+    // fingerprint only ever proved "somebody enrolled on this phone", whereas the
+    // server compares the face to the picker's reference photo. The fingerprint
+    // now guards OPENING the app (src/lock.ts), which is where it earns its keep.
+    // Two prompts, each doing something the other cannot.
     if (demo) {
-      const biometric = await LocalAuthentication.authenticateAsync({
-        promptMessage: clockingIn ? 'Approve clock-in' : 'Approve clock-out',
-        promptSubtitle: session.locations[0].name,
-        disableDeviceFallback: true,
-        requireConfirmation: true,
-      });
-      if (!biometric.success) {
-        const why = biometricFailureMessage(biometric);
-        if (why) Alert.alert(clockingIn ? 'Clock-in not approved' : 'Clock-out not approved', why);
-        return;
-      }
+      const shot = await askForSelfie();
+      if (!shot) return;
       setDemoState(clockingIn ? 'on' : 'done');
       return;
     }
@@ -103,18 +139,11 @@ export default function ClockScreen() {
       if (position.mocked === true) throw new Error('mock_location_detected');
       if ((position.coords.accuracy ?? Infinity) > 100) throw new Error('poor_gps_accuracy');
 
-      const biometric = await LocalAuthentication.authenticateAsync({
-        promptMessage: clockingIn ? 'Approve clock-in' : 'Approve clock-out',
-        promptSubtitle: session.locations[0].name,
-        disableDeviceFallback: true,
-        biometricsSecurityLevel: 'strong',
-        requireConfirmation: true,
-      });
-      if (!biometric.success) {
-        const why = biometricFailureMessage(biometric);
-        if (why) Alert.alert(clockingIn ? 'Clock-in not approved' : 'Clock-out not approved', why);
-        return;
-      }
+      // Location is checked BEFORE the camera on purpose: being told to move
+      // closer to the store after posing for a photo is a worse experience than
+      // being told before.
+      const selfieUri = await askForSelfie();
+      if (!selfieUri) return;
 
       const challenge = await apiPost<{ payload: string; request_hash: string }>('/api/mobile/punch/challenge', {
         install_secret: installSecret,
@@ -126,7 +155,11 @@ export default function ClockScreen() {
         location_mocked: false, // a mocked position is refused above, before any request
       });
       const integrityToken = await requestIntegrityToken(challenge.request_hash);
-      await apiPost('/api/mobile/punch/commit', { install_secret: installSecret, payload: challenge.payload, integrity_token: integrityToken });
+      await apiPostFile('/api/mobile/punch/commit', {
+        install_secret: installSecret,
+        payload: challenge.payload,
+        integrity_token: integrityToken,
+      }, selfieUri);
       await refresh();
     } catch (error) {
       Alert.alert(clockingIn ? 'Clock-in failed' : 'Clock-out failed', friendlyError(error));
@@ -188,6 +221,22 @@ export default function ClockScreen() {
           >
             <Icon name="calendar" size={17} color={C.brand} strokeWidth={2} />
             <Text style={styles.scheduleText}>Schedule</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={unread ? `Notifications, ${unread} unread` : 'Notifications'}
+            onPress={() => router.push('/notifications')}
+            style={({ pressed }) => [styles.bellBtn, pressed && { backgroundColor: C.pressed }]}
+            hitSlop={6}
+          >
+            <Icon name="alert" size={18} color={C.brand} strokeWidth={2} />
+            {unread > 0 && (
+              <View style={styles.badge}>
+                {/* Past 9 the exact number stops mattering and starts breaking
+                    the circle, which is the usual convention for a reason. */}
+                <Text style={styles.badgeText}>{unread > 9 ? '9+' : unread}</Text>
+              </View>
+            )}
           </Pressable>
         </View>
 
@@ -259,7 +308,10 @@ export default function ClockScreen() {
                 ]}
               >
                 {busy ? <ActivityIndicator color={onShift ? C.brand : C.onBrand} size="large" /> : <>
-                  {bio ? <Icon name={bio} size={44} color={!canPunch ? C.faint : onShift ? C.brand : C.onBrand} strokeWidth={1.6} /> : <View style={{ width: 44, height: 44 }} />}
+                  {/* A camera, not a fingerprint: the punch now asks for a photo.
+                      Promising a fingerprint here would be a lie about what the
+                      next tap does. */}
+                  <Icon name="face" size={44} color={!canPunch ? C.faint : onShift ? C.brand : C.onBrand} strokeWidth={1.6} />
                   <Text style={[styles.punchMain, onShift && styles.punchMainOut, !canPunch && styles.punchMainDisabled]}>
                     {onShift ? 'Clock out' : 'Clock in'}
                   </Text>
@@ -279,12 +331,25 @@ export default function ClockScreen() {
             ) : onShift ? (
               <Text style={styles.punchHint}>Break taken</Text>
             ) : (
-              <Text style={styles.punchHint}>{bio ? `Tap, then use your ${bio === 'face' ? 'face' : 'fingerprint'}` : ' '}</Text>
+              <Text style={styles.punchHint}>Tap, then take a photo of your face</Text>
             )}
           </View>
         )}
 
       </ScrollView>
+      {/* Stays mounted and driven by `visible`, rather than being conditionally
+          rendered. RN's Modal keeps itself rendered after visible goes false
+          purely so it can animate out, so unmounting it here would take the
+          dismiss animation with it. Capture state is reset on every exit path
+          inside the sheet instead -- see the finally in SelfieSheet.take(). */}
+      <SelfieSheet
+        visible={selfieOpen}
+        // The sheet can only be open because punch() opened it, and punch()
+        // returns early without a session -- but nothing in the types says so.
+        action={session?.action === 'clock_out' ? 'clock_out' : 'clock_in'}
+        onCapture={(uri) => finishSelfie(uri)}
+        onCancel={() => finishSelfie(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -320,6 +385,16 @@ const styles = StyleSheet.create({
   secondary: { marginTop: 18, paddingVertical: 8, paddingHorizontal: 12 },
   secondaryText: { color: C.brand, fontSize: 15, fontWeight: '700', textDecorationLine: 'underline' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  bellBtn: {
+    width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: C.line, backgroundColor: C.paper,
+  },
+  badge: {
+    position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, borderRadius: 9,
+    paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.danger, borderWidth: 2, borderColor: C.canvas,
+  },
+  badgeText: { color: C.onBrand, fontSize: 10, fontWeight: '800' },
   scheduleBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8,
     borderRadius: 99, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line,

@@ -5,7 +5,6 @@ const MESSAGES: Record<string, string> = {
   // Punches
   already_clocked_in: "You're already clocked in.",
   already_clocked_in_today: "You've already clocked in today.",
-  already_clocked_out_today: "You've already clocked out today.",
   no_open_shift: "You're not clocked in, so there's nothing to clock out of.",
   wrong_clock_out_location: 'Clock out at the store where you clocked in.',
   not_rostered_here_now: "You're not rostered at this store right now.",
@@ -17,6 +16,7 @@ const MESSAGES: Record<string, string> = {
   location_missing: 'This store could not be found. Ask your supervisor.',
   challenge_expired: 'That took too long. Try again.',
   challenge_used: 'That punch was already sent. Pull down to refresh your status.',
+  duplicate_punch: 'That punch was already sent. Pull down to refresh your status.',
   invalid_challenge: 'Something went wrong. Try again.',
   device_inactive: 'This phone is no longer registered. Ask your admin for a new setup code.',
   employee_inactive: 'Your account is not active. Ask your supervisor.',
@@ -28,6 +28,11 @@ const MESSAGES: Record<string, string> = {
   replacement_device_changed: 'Your registered phone changed while setting up. Ask your admin for a new code.',
   break_already_taken: "You've already taken your break this shift.",
   punch_rejected: 'The punch was not accepted. Try again, or ask your supervisor.',
+  // Face check
+  no_face_captured: 'No face was found in the photo. Move into good light, fill the frame and take it again.',
+  face_engine_unavailable: 'The face check is not working right now. Tell your supervisor — retaking the photo will not help.',
+  app_update_required: 'This version of the app is out of date. Update it from the Play Store, then clock in again.',
+  selfie_too_large: 'That photo was too big to send. Try again.',
 };
 
 export function friendlyError(error: unknown): string {

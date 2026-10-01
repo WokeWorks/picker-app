@@ -11,8 +11,17 @@ Native React Native/Expo app for picker clock-in and clock-out.
 
 What is implemented today (Android):
 
-- The phone's biometric system stays on-device. OpsPro never receives a face or fingerprint template.
-- The app only proceeds after a Class 3 (strong) biometric prompt, with PIN/passcode fallback disabled. This is enforced by the app itself; the server does not receive proof that the prompt ran.
+- **Identity on a punch is proved by a face check on the SERVER.** Clocking in or
+  out takes a selfie, which is uploaded and compared to the picker's reference
+  photo by the same code the wall kiosk uses (`describeFace` then `faceGate`). The
+  phone never measures the face and is never asked to: a verdict from a device the
+  picker controls is worth nothing.
+- The phone's own fingerprint/face unlock is used to OPEN the app, replacing typing
+  a mobile number. It is a convenience gate, not a punch-path control — the server
+  does not receive, and does not rely on, proof that it ran.
+- The phone's biometric system stays on-device. OpsPro never receives a fingerprint
+  or face template from it. (The punch selfie is an ordinary photo, stored in the
+  `selfies` bucket, the same as a kiosk punch.)
 - Each picker has one active registered phone. Registration uses a one-time, 15-minute setup code issued by an admin.
 - The phone holds a random install secret in SecureStore. Every request presents it, so it acts as the device credential.
 - Every punch uses a short-lived, single-use server challenge. The exact punch payload (picker device, action, store, GPS) is bound to a Google Play Integrity token that the server verifies: genuine OpsPro build from Play, genuine device, licensed.
@@ -21,7 +30,12 @@ What is implemented today (Android):
 
 Known limits:
 
-- Device biometrics prove that someone enrolled on the phone approved the punch, not which person. Anyone whose fingerprint is added to the phone can punch. One-person phone control is an operating rule, not a technical control.
+- A bad face match does NOT stop a punch. It is recorded, flagged, and an alert is
+  raised on the first one (the kiosk refuses instead, after three). Founder
+  decision, 2026-09-29. This only works as a control if somebody actually reviews
+  the flags — the selfie is stored so there is something to look at.
+- A picker with no reference photo on file flags on EVERY punch, by design, so that
+  nothing passes unchecked and silently.
 - The mock-location flag comes from the phone, so it only catches an unmodified app.
 - Not yet built: a hardware-backed signing key that only unlocks with biometrics (Android Keystore + Key Attestation) and signs each punch. That is what would give the server proof of the biometric approval and of this exact phone.
 - iOS enrollment stays fail-closed until the App Attest verifier ships.

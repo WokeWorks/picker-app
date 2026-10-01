@@ -45,6 +45,13 @@
         }
       ],
       [
+        "expo-camera",
+        {
+          "cameraPermission": "OpsPro Picker takes a photo of your face when you clock in or out, so your hours are recorded as yours.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
         "expo-notifications",
         {
           "color": "#1B5746"

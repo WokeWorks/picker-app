@@ -34,10 +34,18 @@ export default function EnrollScreen() {
   async function verifyBiometric() {
     setChecking(true);
     try {
+      // Confirms a real person is holding the phone before it is permanently bound
+      // to this picker. Device fallback is ON for the same reason as the lock
+      // screen: a phone with only a passcode is allowed to enrol now, so refusing
+      // it here would re-impose the gate that was just removed, one screen later.
+      //
+      // promptSubtitle no longer promises a fingerprint at punch time — it is a
+      // photo now. Saying otherwise here is the first thing a picker reads about
+      // how clocking in works.
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Approve OpsPro setup',
-        promptSubtitle: 'Use the fingerprint or face you will clock in with.',
-        disableDeviceFallback: true,
+        promptSubtitle: 'This links this phone to you.',
+        disableDeviceFallback: false,
         biometricsSecurityLevel: 'strong',
         requireConfirmation: true,
       });

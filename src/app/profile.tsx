@@ -113,8 +113,12 @@ export default function ProfileScreen() {
       const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
       if (!secret) throw new Error('device_inactive');
       await apiPostFile('/api/mobile/profile/photo', { install_secret: secret }, preview);
+      // Past this line the photo IS accepted. The reload below is a refresh of
+      // this screen, and its failure must never be reported as a failed upload --
+      // the picker would send the same photo again and create a second pending
+      // proposal for a supervisor to work through.
       setPreview(null);
-      await load();
+      void load();
       Alert.alert('Sent', 'Your supervisor will check the new photo. Until then your current photo stays in use.');
     } catch (e) {
       // The server's own words: it explains whether no face was found, the light

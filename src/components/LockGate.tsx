@@ -121,12 +121,22 @@ export function LockGate({ children }: { children: React.ReactNode }) {
       // listener re-locks the instant it asks to unlock, and prompts forever.
       if (isPrompting()) return;
 
+      // Read through a function so TypeScript cannot narrow the result of the
+      // first call away at the second. Reading the ref directly made the check
+      // below look like dead code, it was removed on that basis, and it is not
+      // dead -- readEnrolment() is awaited and the mount effect can raise the
+      // cover while it is pending.
+      // Anything but 'open': the cover is on screen during 'deciding' too (see
+      // `locked` below), and continuing from there could call unlock() in parallel
+      // with the mount effect's own.
+      const alreadyLocked = () => phaseRef.current !== 'open';
+
       // ALREADY locked: the cover is up and the picker has a Try again button.
       // Without this, cancelling a prompt on any Android that pauses the activity
       // re-locked and re-prompted the moment the activity resumed -- so the
       // cancel button could never be used. The isPrompting guard above does not
       // catch it, because by then the prompt has already resolved.
-      if (phaseRef.current === 'locked') return;
+      if (alreadyLocked()) return;
 
       // Nothing to judge: the app never actually went away. This replaces
       // tracking the previous AppState, which was redundant -- leftAt already
@@ -157,12 +167,12 @@ export function LockGate({ children }: { children: React.ReactNode }) {
         markReturned();
         return;
       }
-      // Re-checked after the await: the picker may have unlocked, or a prompt may
-      // have started, while SecureStore was being read. The phase is deliberately
-      // NOT re-checked -- it was checked above and only this function sets it to
-      // 'locked', so a second test is dead code that TypeScript correctly refuses
-      // to believe.
-      if (isPrompting() || isUnlocked()) return;
+      // Re-checked after the await, PHASE INCLUDED. The picker may have unlocked,
+      // a prompt may have started, or the mount effect may have raised the cover
+      // while the enrolment was being read -- and calling unlock() on a cover that
+      // is already up re-prompts over a cancelled one, which is the loop the Try
+      // again button exists to let them escape.
+      if (alreadyLocked() || isPrompting() || isUnlocked()) return;
 
       markLocked();
       setPhase('locked');

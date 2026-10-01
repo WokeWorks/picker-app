@@ -1,6 +1,6 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
@@ -99,6 +99,12 @@ export default function ClockScreen() {
   // so a notifications outage can never stop the clock screen loading — the thing
   // pickers actually need it for.
   const [unread, setUnread] = useState(0);
+  // 380, not 360. At exactly 360 -- one of the commonest Android widths -- the
+  // full row measured about 314dp against 312 available once the new gap was
+  // counted, so the threshold has to sit ABOVE it rather than on it. The gap is
+  // 4 for the same reason.
+  const { width } = useWindowDimensions();
+  const narrow = width < 380;
 
   function askForSelfie(): Promise<string | null> {
     return new Promise((resolve) => {
@@ -211,7 +217,9 @@ export default function ClockScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} tintColor={C.brand} colors={[C.brand]} />}
       >
         <View style={styles.header}>
-          <Brand />
+          {/* The only element that may shrink: the three controls are fixed-size
+              targets and must stay tappable. */}
+          <View style={styles.brandShrink}><Brand /></View>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Your shift schedule"
@@ -220,7 +228,12 @@ export default function ClockScreen() {
             hitSlop={6}
           >
             <Icon name="calendar" size={17} color={C.brand} strokeWidth={2} />
-            <Text style={styles.scheduleText}>Schedule</Text>
+            {/* The word is dropped on a narrow phone. With the brand, Schedule,
+                the bell and the profile button, the row needed more than the
+                272dp a 320dp screen leaves after padding -- and a row that cannot
+                shrink clips, so the profile button simply vanished. The icon and
+                its accessibility label still say what it is. */}
+            {!narrow && <Text style={styles.scheduleText}>Schedule</Text>}
           </Pressable>
           <Pressable
             accessibilityRole="button"
@@ -393,7 +406,9 @@ const styles = StyleSheet.create({
   breakBtnText: { color: C.onOrange, fontSize: 15, fontWeight: '700' },
   secondary: { marginTop: 18, paddingVertical: 8, paddingHorizontal: 12 },
   secondaryText: { color: C.brand, fontSize: 15, fontWeight: '700', textDecorationLine: 'underline' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  // gap, and children allowed to shrink: the row holds four things now, and
+  // space-between alone let them collide rather than tighten.
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 },
   bellBtn: {
     width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: C.line, backgroundColor: C.paper,
@@ -409,4 +424,5 @@ const styles = StyleSheet.create({
     borderRadius: 99, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line,
   },
   scheduleText: { color: C.brand, fontSize: 14, fontWeight: '700' },
+  brandShrink: { flexShrink: 1, minWidth: 0 },
 });

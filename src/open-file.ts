@@ -64,33 +64,11 @@ export async function openRemoteFile(
     // reporting.
   }
 
-  // Age-based, NOT a wholesale wipe. Emptying the directory on every open pulled
-  // the file out from under the viewer still showing the PREVIOUS document: its
-  // content:// permission was granted, but the bytes were gone, so returning to
-  // that app or letting it lazily re-read showed a failure.
-  //
-  // These are passports and visas, so they cannot simply accumulate either. An
-  // hour is comfortably longer than anyone reads a document and short enough that
-  // they do not sit on the device.
-  try {
-    const cutoff = Date.now() - VIEWED_CACHE_TTL_MS;
-    for (const entry of dir.list()) {
-      if (!(entry instanceof fs.File)) continue;
-      // modificationTime is ALREADY milliseconds since epoch (File.types.d.ts).
-      // Multiplying by 1000 made every file look ~50,000 years old in the future,
-      // so nothing was ever swept and identity documents accumulated forever --
-      // worse than the wipe this replaced, because unique names mean no overwrite
-      // cleans them up either. Only the /legacy API uses seconds.
-      const touched = entry.modificationTime ?? entry.creationTime;
-      // An unreadable timestamp is treated as stale rather than kept forever: a
-      // file we cannot date is a file we cannot promise to clean up later.
-      if (touched && touched > cutoff) continue;
-      entry.delete();
-    }
-  } catch {
-    // A failed sweep leaves files behind; it must never stop someone opening a
-    // document they are entitled to see.
-  }
+  // Awaited. It worked un-awaited only because passing `fs` skips the dynamic
+  // import, so the loop happened to run synchronously -- any await added before
+  // that loop later would have had the sweep racing the download below. It never
+  // throws, so awaiting costs nothing.
+  await sweepViewedCache(fs);
 
   // Unique per download, so two documents can never share a path. The previous
   // naming derived the filename from the stored name, and two files both called
@@ -169,4 +147,43 @@ function safeName(fileName: string | null | undefined, mimeType: string): string
     .trim()
     .slice(0, 60) || 'document';
   return `${base}.${extFor(mimeType)}`;
+}
+
+/**
+ * Delete viewed copies older than the retention window.
+ *
+ * Age-based rather than a wholesale wipe: emptying the directory on every open
+ * pulled the file out from under the viewer still showing the PREVIOUS document.
+ * Its content:// permission was granted, but the bytes were gone.
+ *
+ * Exported because running it only inside openRemoteFile means a picker who views
+ * one document and never opens another keeps that copy indefinitely -- the window
+ * would be a promise nothing enforced. The documents screen calls this on mount,
+ * so the sweep happens on the way IN as well as on the way out.
+ *
+ * It is still best-effort: React Native has no background task here, so a phone
+ * that never reopens the app keeps its last copy until the OS evicts the cache.
+ * Said plainly rather than implied, because these are passports.
+ */
+export async function sweepViewedCache(fsModule?: typeof import('expo-file-system')): Promise<void> {
+  try {
+    const fs = fsModule ?? (await import('expo-file-system'));
+    const dir = new fs.Directory(fs.Paths.cache, CACHE_DIR);
+    if (!dir.exists) return;
+    const cutoff = Date.now() - VIEWED_CACHE_TTL_MS;
+    for (const entry of dir.list()) {
+      if (!(entry instanceof fs.File)) continue;
+      // modificationTime is ALREADY milliseconds since epoch (File.types.d.ts).
+      // Only the /legacy API uses seconds, and multiplying by 1000 made every file
+      // look millennia in the future, so nothing was ever swept.
+      const touched = entry.modificationTime ?? entry.creationTime;
+      // An unreadable timestamp is treated as stale: a file we cannot date is one
+      // we cannot promise to clean up later.
+      if (touched && touched > cutoff) continue;
+      entry.delete();
+    }
+  } catch {
+    // A failed sweep leaves files behind; it must never stop someone opening a
+    // document they are entitled to see.
+  }
 }

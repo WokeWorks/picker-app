@@ -7,7 +7,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Icon } from '@/components/Icon';
 import { MAX_DOCUMENT_SIDE, isStoragePickerAvailable, pickFromStorage } from '@/image';
 import { INSTALL_SECRET_KEY, apiPost, apiPostFile } from '@/native-api';
-import { openRemoteFile } from '@/open-file';
+import { openRemoteFile, sweepViewedCache } from '@/open-file';
 import { type Profile, type ProfileDocument, describeWait, expiryState, formatDate } from '@/profile';
 import { C } from '@/theme';
 
@@ -81,6 +81,11 @@ export default function DocumentsScreen() {
 
   useEffect(() => { void isStoragePickerAvailable().then(setStorageOk); }, []);
 
+  // Sweeps old viewed copies on the way IN, not only when another document is
+  // opened. Viewing one document and never opening another would otherwise keep
+  // that copy -- a passport or a visa -- for as long as the app is installed.
+  useEffect(() => { void sweepViewedCache(); }, []);
+
   const choose = useCallback(async (doc: ProfileDocument) => {
     // See profile.tsx: a double-tap otherwise starts two pickers, and the second
     // throws over the top of the first.
@@ -113,9 +118,13 @@ export default function DocumentsScreen() {
         { install_secret: secret, doc_type: preview.doc.doc_type },
         preview.uri,
       );
+      // Past the upload above the document IS accepted. The reload is a refresh of
+      // this screen; reporting its failure as a failed send would have the picker
+      // submit the same file again, and the route would then refuse it as already
+      // waiting -- an error for something that worked.
       const label = preview.doc.label;
       setPreview(null);
-      await load();
+      void load();
       Alert.alert('Sent', `Your supervisor will check your ${label}. You can send another one once they have.`);
     } catch (e) {
       Alert.alert('Not sent', e instanceof Error ? e.message : 'That could not be sent. Try again.');

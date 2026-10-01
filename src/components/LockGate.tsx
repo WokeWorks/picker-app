@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, type AppStateStatus, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as SecureStore from 'expo-secure-store';
 
 import { biometricFailureMessage, useBiometricKind } from '@/biometric';
 import { Brand } from '@/components/Brand';
 import { Icon } from '@/components/Icon';
 import { hasBeenAway, isPrompting, isUnlocked, markLeft, markLocked, markReturned, requestUnlock } from '@/lock';
-import { DEVICE_ID_KEY } from '@/native-api';
+import { isEnrolled, readEnrolment } from '@/native-api';
 import { C } from '@/theme';
 
 type Phase =
@@ -63,11 +62,20 @@ export function LockGate({ children }: { children: React.ReactNode }) {
   // registration again each time. See the comment there.
   useEffect(() => {
     let mounted = true;
-    SecureStore.getItemAsync(DEVICE_ID_KEY)
-      .then((deviceId) => {
+    // BOTH keys, matching index.tsx exactly. Gating on either one alone makes the
+    // two disagree: on the device id, the picker unlocks their way to a screen
+    // that only tells them to get a new setup code; on the secret, a phone index
+    // has already sent to setup still gets an unlock wall in front of it.
+    readEnrolment()
+      .then((enrolment) => {
         if (!mounted) return;
-        lastKnownRegistered.current = !!deviceId;
-        if (!deviceId) {
+        const registered = isEnrolled(enrolment);
+        // Only recorded when the read actually WORKED. An unreadable keystore must
+        // not be remembered as "not registered", or the first foreground after it
+        // would fall back to that wrong answer and leave the phone ungated for the
+        // rest of the session.
+        if (enrolment.ok) lastKnownRegistered.current = registered;
+        if (!registered) {
           setPhase('open');
           return;
         }
@@ -138,15 +146,13 @@ export function LockGate({ children }: { children: React.ReactNode }) {
       // so a cached "not gated" would mean the lock never appears again until the
       // app is killed -- the one session where it matters most, because the phone
       // has just become able to punch.
-      let registered: boolean;
-      try {
-        registered = !!(await SecureStore.getItemAsync(DEVICE_ID_KEY));
-        lastKnownRegistered.current = registered;
-      } catch {
-        // A read that THREW is "I don't know", not "not registered". Fall back to
-        // what was last known: a phone we have seen registered stays gated.
-        registered = lastKnownRegistered.current;
-      }
+      // A read that THREW is "I don't know", not "not registered" -- readEnrolment
+      // reports that as ok:false rather than hiding it behind a null. Falling back
+      // to the last known state means a phone we have seen registered stays gated
+      // through a transient keystore error, instead of silently opening.
+      const enrolment = await readEnrolment();
+      const registered = enrolment.ok ? isEnrolled(enrolment) : lastKnownRegistered.current;
+      if (enrolment.ok) lastKnownRegistered.current = registered;
       if (cancelled || !registered) {
         markReturned();
         return;

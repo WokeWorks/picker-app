@@ -174,7 +174,7 @@ export default function ClockScreen() {
     try {
       const installSecret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
       if (!installSecret) throw new Error('device_inactive');
-      await apiPost('/api/mobile/break', { install_secret: installSecret, action });
+      await apiPost('/api/mobile/break', { install_secret: installSecret, action }, { timeoutMs: 45_000 });
       await refresh();
     } catch (error) {
       Alert.alert(action === 'start' ? 'Could not start your break' : 'Could not end your break', friendlyError(error));

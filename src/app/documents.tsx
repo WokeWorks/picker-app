@@ -183,7 +183,12 @@ export default function DocumentsScreen() {
               <DocumentRow
                 key={doc.doc_type}
                 doc={doc}
-                canUpload={storageOk}
+                // BOTH: storageOk says this build can open a picker at all,
+                // doc.can_upload is the server's rule about this document. They
+                // answer different questions, and the server's is the one the
+                // route will actually enforce -- so a button shown against it is
+                // a button that fails after the picker has chosen a file.
+                canUpload={storageOk && doc.can_upload}
                 onUpload={() => void choose(doc)}
               />
             ))}

@@ -20,6 +20,14 @@ import { Platform } from 'react-native';
 /** Where a viewed file is cached. Sits under the OS cache, so Android can reclaim it. */
 const CACHE_DIR = 'viewed-documents';
 
+/** How long a downloaded copy may stay in the cache. See the sweep in openRemoteFile. */
+const VIEWED_CACHE_TTL_MS = 60 * 60 * 1000;
+
+/** Short random prefix, so two documents cannot land on the same cache path. */
+function randomId(): string {
+  return Math.random().toString(36).slice(2, 10);
+}
+
 export const OPEN_UNAVAILABLE =
   'This version of the app cannot open files. Ask your supervisor to update it.';
 
@@ -50,23 +58,44 @@ export async function openRemoteFile(
 
   const dir = new fs.Directory(fs.Paths.cache, CACHE_DIR);
   try {
-    // Emptied on every open. These are passports and visas sitting in a cache the
-    // app never cleaned, and the previous naming could also collide: two files
-    // both called "document.jpg" shared one path, so opening the second
-    // overwrote the file a viewer still had open on the first.
-    if (dir.exists) dir.delete();
-    dir.create({ intermediates: true });
+    if (!dir.exists) dir.create({ intermediates: true });
   } catch {
-    // A directory that cannot be cleared is not worth failing over until the
-    // download below fails for a reason worth reporting.
+    // Not worth failing over until the download below fails for a reason worth
+    // reporting.
   }
 
-  const target = new fs.File(dir, name);
+  // Age-based, NOT a wholesale wipe. Emptying the directory on every open pulled
+  // the file out from under the viewer still showing the PREVIOUS document: its
+  // content:// permission was granted, but the bytes were gone, so returning to
+  // that app or letting it lazily re-read showed a failure.
+  //
+  // These are passports and visas, so they cannot simply accumulate either. An
+  // hour is comfortably longer than anyone reads a document and short enough that
+  // they do not sit on the device.
   try {
-    if (target.exists) target.delete();
+    const cutoff = Date.now() - VIEWED_CACHE_TTL_MS;
+    for (const entry of dir.list()) {
+      if (!(entry instanceof fs.File)) continue;
+      // modificationTime is ALREADY milliseconds since epoch (File.types.d.ts).
+      // Multiplying by 1000 made every file look ~50,000 years old in the future,
+      // so nothing was ever swept and identity documents accumulated forever --
+      // worse than the wipe this replaced, because unique names mean no overwrite
+      // cleans them up either. Only the /legacy API uses seconds.
+      const touched = entry.modificationTime ?? entry.creationTime;
+      // An unreadable timestamp is treated as stale rather than kept forever: a
+      // file we cannot date is a file we cannot promise to clean up later.
+      if (touched && touched > cutoff) continue;
+      entry.delete();
+    }
   } catch {
-    // Ignored: the download overwrites it anyway.
+    // A failed sweep leaves files behind; it must never stop someone opening a
+    // document they are entitled to see.
   }
+
+  // Unique per download, so two documents can never share a path. The previous
+  // naming derived the filename from the stored name, and two files both called
+  // "document.jpg" collided.
+  const target = new fs.File(dir, `${randomId()}-${name}`);
 
   let downloaded;
   try {

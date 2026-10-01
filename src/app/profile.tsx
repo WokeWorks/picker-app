@@ -139,18 +139,56 @@ export default function ProfileScreen() {
           text: 'Sign out',
           style: 'destructive',
           onPress: async () => {
-            try {
-              const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-              if (secret) await apiPost('/api/mobile/profile/sign-out', { install_secret: secret });
-            } catch {
-              // The local keys are cleared regardless. Someone signing out because
-              // they are handing the phone on must not be left signed in by a
-              // failed network call -- and the server-side revoke can be done by a
-              // supervisor, whereas leaving the secret on a phone they no longer
-              // hold cannot be undone.
+            // READ FIRST, and await it. Firing the read and a delete together
+            // raced: expo-secure-store does not promise ordering, so the delete
+            // could win, the secret came back null, and the server was never told
+            // to revoke -- leaving the device active with the phone's credential
+            // already gone.
+            const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY).catch(() => null);
+
+            // Started, NOT awaited. Even a bounded wait is time in which this
+            // phone is still signed in, and the reason to tap this is that it is
+            // being handed to somebody else. A supervisor can revoke the device
+            // from the dashboard; a secret left on a phone they no longer hold
+            // cannot be undone.
+            if (secret) {
+              void apiPost('/api/mobile/profile/sign-out', { install_secret: secret }).catch(() => {});
             }
-            await SecureStore.deleteItemAsync(INSTALL_SECRET_KEY).catch(() => {});
-            await SecureStore.deleteItemAsync(DEVICE_ID_KEY).catch(() => {});
+
+            // BOTH keys, each retried once, and nothing is assumed about which
+            // matters more. They do different jobs and both have to go:
+            //   INSTALL_SECRET_KEY authenticates every call to the server.
+            //   DEVICE_ID_KEY is what index.tsx and LockGate read to decide this
+            //   phone is enrolled -- so leaving it behind sends the picker to a
+            //   clock screen whose every request then fails.
+            // Calling the device id "a label" was wrong, and it is exactly the key
+            // whose survival strands someone.
+            const cleared = await Promise.all(
+              [INSTALL_SECRET_KEY, DEVICE_ID_KEY].map((key) => clearKey(key)),
+            );
+            const [secretCleared, deviceCleared] = cleared;
+
+            if (!secretCleared) {
+              // The credential survived, so this phone really is still signed in
+              // and a retry is the right thing to offer.
+              Alert.alert(
+                'Could not sign out',
+                'This phone could not be cleared, so it is still signed in. Try again, and tell your supervisor if it keeps failing.',
+              );
+              return;
+            }
+            if (!deviceCleared) {
+              // Both a delete and a blanking write failed, so the enrolment marker
+              // is genuinely stuck. Navigating would bounce straight back to the
+              // clock screen and fail on every call, and reopening the app does
+              // the same -- index.tsx reads this key on every cold start. Only a
+              // supervisor can resolve it from here.
+              Alert.alert(
+                'Signed out, but this phone is stuck',
+                'Your phone has been signed out, but it still shows as set up and will not work for clocking in. Show this to your supervisor.',
+              );
+              return;
+            }
             router.replace('/');
           },
         },
@@ -385,6 +423,40 @@ export default function ProfileScreen() {
       )}
     </SafeAreaView>
   );
+}
+
+/**
+ * Clear one SecureStore key: delete, retry, then blank it.
+ *
+ * The blanking step is the one that matters. Every reader of these keys tests
+ * TRUTHINESS, and readEnrolment() in native-api.ts normalises an empty string to
+ * null, so a blanked key reads exactly like a missing one everywhere it is used.
+ *
+ * That turns the one state with no way out into a recoverable one. If the device
+ * id survives while the secret is gone, a cold start routes straight back to
+ * /clock and every call there fails; "close and reopen the app" does not help,
+ * because index.tsx reads the same key again and does the same thing. Writing an
+ * empty value is a second, independent way to reach the same result, and a
+ * keystore that refuses a delete may well accept a write.
+ *
+ * One retry before that, not a loop: if a delete fails twice it is not transient,
+ * and the picker should be told rather than held at a spinner.
+ */
+async function clearKey(key: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await SecureStore.deleteItemAsync(key);
+      return true;
+    } catch {
+      // Fall through to the retry, then to the blanking fallback below.
+    }
+  }
+  try {
+    await SecureStore.setItemAsync(key, '');
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function Field({ label, value }: { label: string; value: string }) {

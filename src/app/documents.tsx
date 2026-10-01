@@ -113,16 +113,45 @@ export default function DocumentsScreen() {
     try {
       const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
       if (!secret) throw new Error('device_inactive');
-      await apiPostFile(
+      const sent = await apiPostFile<{ request_id?: string }>(
         '/api/mobile/profile/document',
         { install_secret: secret, doc_type: preview.doc.doc_type },
         preview.uri,
       );
-      // Past the upload above the document IS accepted. The reload is a refresh of
-      // this screen; reporting its failure as a failed send would have the picker
-      // submit the same file again, and the route would then refuse it as already
-      // waiting -- an error for something that worked.
-      const label = preview.doc.label;
+      // Past this line the document IS accepted, and the screen has to say so
+      // IMMEDIATELY -- not when the reload lands.
+      //
+      // Awaiting the reload is not the answer: a failed reload would then be
+      // reported as a failed upload, and the picker would send the file again.
+      // But firing it and doing nothing else left can_upload stale and the button
+      // live, so a second tap hit the route and was refused as already waiting --
+      // an error for something that had worked.
+      //
+      // So the row is marked pending from the response itself. The reload below
+      // only reconciles, and a failure now costs a stale timestamp rather than a
+      // duplicate submission.
+      const { doc, mimeType, name } = preview;
+      setProfile((prev) => (prev ? {
+        ...prev,
+        documents: prev.documents.map((d) => (d.doc_type === doc.doc_type
+          ? {
+              ...d,
+              can_upload: false,
+              pending: {
+                id: sent?.request_id ?? `local-${doc.doc_type}`,
+                // No signed URL yet; the reload supplies it. The row shows the
+                // waiting banner, which needs no preview.
+                url: null,
+                submitted_at: new Date().toISOString(),
+                file_name: name,
+                mime_type: mimeType,
+                expiry_date: null,
+              },
+            }
+          : d)),
+      } : prev));
+
+      const label = doc.label;
       setPreview(null);
       void load();
       Alert.alert('Sent', `Your supervisor will check your ${label}. You can send another one once they have.`);

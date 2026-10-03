@@ -9,6 +9,7 @@ import { Icon } from '@/components/Icon';
 import { SourceSheet } from '@/components/SourceSheet';
 import { MAX_UPLOAD_SIDE, isStoragePickerAvailable, pickFromStorage } from '@/image';
 import { DEVICE_ID_KEY, INSTALL_SECRET_KEY, apiPost, apiPostFile, formatPhone, clearKey, requireInstallSecret } from '@/native-api';
+import { friendlyError } from '@/messages';
 import { type Profile } from '@/profile';
 import { C } from '@/theme';
 
@@ -71,6 +72,13 @@ export default function ProfileScreen() {
       if (e instanceof Error && e.message === 'device_inactive') return;
       if (e instanceof Error && e.message === 'deregistered_stuck') {
         setError('This phone has been removed from your account. Show this to your supervisor.');
+        return;
+      }
+      // A keystore that could not be READ is retryable and says how: the generic
+      // "pull down to try again" below is true but omits the one thing that
+      // usually clears it.
+      if (e instanceof Error && e.message === 'enrolment_unreadable') {
+        setError(friendlyError(e));
         return;
       }
       setError('Could not load your details. Pull down to try again.');

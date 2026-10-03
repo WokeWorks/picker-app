@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Icon } from '@/components/Icon';
 import { MAX_DOCUMENT_SIDE, isStoragePickerAvailable, pickFromStorage } from '@/image';
 import { apiPost, apiPostFile, requireInstallSecret } from '@/native-api';
+import { friendlyError } from '@/messages';
 import { openRemoteFile, sweepViewedCache } from '@/open-file';
 import { type Profile, type ProfileDocument, expiryState, formatDate } from '@/profile';
 import { C } from '@/theme';
@@ -67,6 +68,13 @@ export default function DocumentsScreen() {
       if (e instanceof Error && e.message === 'device_inactive') return;
       if (e instanceof Error && e.message === 'deregistered_stuck') {
         setError('This phone has been removed from your account. Show this to your supervisor.');
+        return;
+      }
+      // A keystore that could not be READ is retryable and says how: the generic
+      // "pull down to try again" below is true but omits the one thing that
+      // usually clears it.
+      if (e instanceof Error && e.message === 'enrolment_unreadable') {
+        setError(friendlyError(e));
         return;
       }
       setError('Could not load your documents. Pull down to try again.');

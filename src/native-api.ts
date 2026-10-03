@@ -199,8 +199,23 @@ async function refuseOrThrow(response: Response, result: { error?: string }): Pr
  * screen that can help it.
  */
 export async function requireInstallSecret(): Promise<string> {
-  const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY).catch(() => null);
-  if (secret) return secret;
+  // THROUGH readEnrolment, not a bare getItemAsync with a catch. The first
+  // version used `.catch(() => null)`, which treats a keystore that FAILED TO
+  // ANSWER the same as one that answered "nothing here" -- so a transient read
+  // error sent a perfectly healthy, enrolled phone to setup, and the picker could
+  // not use the app until the keystore happened to recover.
+  //
+  // This codebase has drawn that line before and written it down: "A read that
+  // THREW is 'I don't know', not 'not registered'". readEnrolment is where that
+  // distinction lives, and it also normalises an empty string to null, which
+  // matters because clearKey blanks a key when deleting fails.
+  const enrolment = await readEnrolment();
+  if (!enrolment.ok) {
+    // Retryable, and deliberately NOT a navigation: nothing is known about this
+    // phone, so nothing should be concluded about it.
+    throw new Error('enrolment_unreadable');
+  }
+  if (enrolment.secret) return enrolment.secret;
   router.replace('/');
   throw new Error('device_inactive');
 }

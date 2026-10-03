@@ -355,7 +355,13 @@ export default function NotificationsScreen() {
     const unread = notes
       .filter((n) => !n.read_at && !timers.current.has(n.id) && ids.includes(n.id))
       .map((n) => n.id);
-    if (!unread.length) return;
+    if (!unread.length) {
+      // Still clears the selection. Returning early without it left the screen in
+      // selection mode -- tabs hidden, bulk bar up -- after tapping Mark read on
+      // rows that were all already read, with nothing on screen explaining why.
+      setSelected(new Set());
+      return;
+    }
     setUnreadCount((n) => Math.max(0, n - unread.length));
     // Explicit ids, never "all": the rows that slide out are then exactly the rows
     // that were marked. Anything unread on a page not yet loaded stays unread,

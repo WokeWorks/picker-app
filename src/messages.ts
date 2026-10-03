@@ -21,6 +21,7 @@ const MESSAGES: Record<string, string> = {
   device_inactive: 'This phone is no longer registered. Ask your admin for a new setup code.',
   service_unavailable: 'The office system is not responding. Try again in a moment.',
   deregistered_stuck: 'This phone has been removed from your account, but it could not clear its own setup. Show this to your supervisor.',
+  enrolment_unreadable: 'This phone could not read its own setup. Lock and unlock the screen, then try again.',
   employee_inactive: 'Your account is not active. Ask your supervisor.',
   // Setup
   invalid_code: 'That setup code is not valid. Check the 8 digits and try again.',

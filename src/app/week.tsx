@@ -8,7 +8,7 @@ import { Icon } from '@/components/Icon';
 import { duration } from '@/components/ShiftProgress';
 import { fmtTime } from '@/components/StoreCard';
 import { hasPin, openDirections } from '@/maps';
-import { friendlyError } from '@/messages';
+import { friendlyError, isDeregistered } from '@/messages';
 import { apiPost, INSTALL_SECRET_KEY } from '@/native-api';
 import { C } from '@/theme';
 import { demoWeek, type Week, type WeekDay } from '@/week';
@@ -52,6 +52,7 @@ export default function WeekScreen() {
       if (!installSecret) throw new Error('device_inactive');
       setWeek(await apiPost<Week>('/api/mobile/week', { install_secret: installSecret, week: which }));
     } catch (e) {
+      if (isDeregistered(e)) { router.replace('/'); return; }
       setWeek(null);
       setError(friendlyError(e));
     } finally {

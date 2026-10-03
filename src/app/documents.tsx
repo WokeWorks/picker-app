@@ -63,9 +63,11 @@ export default function DocumentsScreen() {
       setProfile(data);
     } catch (e) {
       if (seq !== loadSeq.current) return;
-      setError(e instanceof Error && e.message === 'device_inactive'
-        ? 'This phone is no longer set up. Ask your supervisor.'
-        : 'Could not load your documents. Pull down to try again.');
+      // Deregistered goes to setup rather than showing a message about a state
+      // the picker cannot leave from here. The credential is already gone by now
+      // (apiPost), so '/' renders setup instead of returning to this screen.
+      if (e instanceof Error && e.message === 'device_inactive') { router.replace('/'); return; }
+      setError('Could not load your documents. Pull down to try again.');
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }

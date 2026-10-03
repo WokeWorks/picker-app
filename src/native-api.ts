@@ -94,7 +94,7 @@ export async function apiPostFile<T>(
     UPLOAD_TIMEOUT_MS,
     'That took too long to send. Check your connection and try again.',
   );
-  if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
+  await refuseOrThrow(response, result);
   return result as T;
 }
 
@@ -121,7 +121,7 @@ export async function apiPost<T>(
     // do is worse than saying nothing.
     'The connection timed out. Check your connection and try again.',
   );
-  if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
+  await refuseOrThrow(response, result);
   return result as T;
 }
 
@@ -139,6 +139,39 @@ export async function apiPost<T>(
  *      would then wait forever with the timer already cancelled. The timer is
  *      cleared only after the body has been read.
  */
+/**
+ * Turn a failed response into a throw -- and, if the server says this phone is no
+ * longer a registered device, DROP ITS CREDENTIAL on the way past.
+ *
+ * Shared by apiPost and apiPostFile deliberately. The first version of this lived
+ * inline, and because both functions end in the same `if (!response.ok) throw`
+ * line it was pasted into apiPostFile -- the file-upload path -- while every
+ * screen goes through apiPost. The result was an infinite loop rather than a
+ * silent miss: screens saw device_inactive and sent the picker to '/', index.tsx
+ * still read a valid enrolment from SecureStore and sent them back to /clock, and
+ * round it went, 94 requests deep before anyone stopped it. One function, one
+ * call site each, so the two cannot drift apart again.
+ *
+ * WHY CLEARING IS SAFE HERE: the server distinguishes a revoked device
+ * (device_inactive, 401) from a lookup it could not perform (service_unavailable,
+ * 503) -- see src/lib/mobile-device-auth.ts. While both answered device_inactive,
+ * a momentary database error would have un-enrolled a healthy phone, recoverable
+ * only by a supervisor issuing a new setup code.
+ *
+ * Deleting is best effort. A keystore that refuses leaves the phone as it was,
+ * which is no worse than not trying.
+ */
+async function refuseOrThrow(response: Response, result: { error?: string }): Promise<void> {
+  if (response.ok) return;
+  if (result.error === 'device_inactive') {
+    await Promise.all([
+      SecureStore.deleteItemAsync(INSTALL_SECRET_KEY).catch(() => {}),
+      SecureStore.deleteItemAsync(DEVICE_ID_KEY).catch(() => {}),
+    ]);
+  }
+  throw new Error(result.error || `Request failed (${response.status})`);
+}
+
 async function withTimeout(
   url: string,
   init: RequestInit,

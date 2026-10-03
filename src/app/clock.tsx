@@ -14,7 +14,7 @@ import { demoSession, type DemoState } from '@/demo';
 import { CameraSheet } from '@/components/CameraSheet';
 import { requestIntegrityToken } from '@/integrity';
 import { registerForReminders } from '@/notifications';
-import { friendlyError } from '@/messages';
+import { friendlyError, isDeregistered } from '@/messages';
 import { C } from '@/theme';
 import { apiPost, apiPostFile, INSTALL_SECRET_KEY } from '@/native-api';
 
@@ -59,7 +59,16 @@ export default function ClockScreen() {
 
   const reload = useCallback(() => {
     setLoading(true);
-    refresh().catch((error) => Alert.alert('Could not load your shift', friendlyError(error))).finally(() => setLoading(false));
+    refresh()
+      .catch((error) => {
+        // A revoked phone is sent to setup instead of being shown an error it can
+        // do nothing about. apiPost has already dropped the credential, so '/'
+        // reads an unenrolled phone and renders the setup screen rather than
+        // bouncing straight back here.
+        if (isDeregistered(error)) { router.replace('/'); return; }
+        Alert.alert('Could not load your shift', friendlyError(error));
+      })
+      .finally(() => setLoading(false));
   }, [refresh]);
 
   useEffect(reload, [reload]);

@@ -66,9 +66,11 @@ export default function ProfileScreen() {
       setProfile(data);
     } catch (e) {
       if (seq !== loadSeq.current) return;
-      setError(e instanceof Error && e.message === 'device_inactive'
-        ? 'This phone is no longer set up. Ask your supervisor.'
-        : 'Could not load your details. Pull down to try again.');
+      // Deregistered goes to setup rather than showing a message about a state
+      // the picker cannot leave from here. The credential is already gone by now
+      // (apiPost), so '/' renders setup instead of returning to this screen.
+      if (e instanceof Error && e.message === 'device_inactive') { router.replace('/'); return; }
+      setError('Could not load your details. Pull down to try again.');
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
@@ -150,14 +152,33 @@ export default function ProfileScreen() {
             // already gone.
             const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY).catch(() => null);
 
-            // Started, NOT awaited. Even a bounded wait is time in which this
-            // phone is still signed in, and the reason to tap this is that it is
-            // being handed to somebody else. A supervisor can revoke the device
-            // from the dashboard; a secret left on a phone they no longer hold
-            // cannot be undone.
-            if (secret) {
-              void apiPost('/api/mobile/profile/sign-out', { install_secret: secret }).catch(() => {});
-            }
+            // Started now, OUTCOME CHECKED LATER. Both halves of that matter.
+            //
+            // Not awaited here, because the local wipe below must not wait on the
+            // network: the reason to tap this is that the phone is being handed to
+            // somebody else, and a secret still on it is the thing that cannot be
+            // undone.
+            //
+            // But the result is no longer THROWN AWAY, which is what the previous
+            // `.catch(() => {})` did. Measured on sandbox 2026-10-02: a picker
+            // signed out, was shown success, and the device row stayed
+            // status='active' with revoked_at null -- last_used_at was NEVER, so
+            // the call had not reached the server even once. Nobody learned that:
+            // not the picker, not the supervisor whose device list still showed the
+            // phone in use, not us.
+            //
+            // That is a security gap and not only bookkeeping. An active row means
+            // the credential still authenticates, so a copy of it recovered from a
+            // backup or a cloned install keeps working until a human happens to
+            // revoke the device by hand. And it is unrecoverable by design: the
+            // secret is wiped a few lines down, so no retry is ever possible.
+            // The one thing left is to TELL somebody, which is what the alert at
+            // the end now does.
+            const revoked = secret
+              ? apiPost('/api/mobile/profile/sign-out', { install_secret: secret })
+                  .then(() => true)
+                  .catch(() => false)
+              : Promise.resolve(false);
 
             // BOTH keys, each retried once, and nothing is assumed about which
             // matters more. They do different jobs and both have to go:
@@ -193,7 +214,21 @@ export default function ProfileScreen() {
               );
               return;
             }
+            // The keys are gone, so this phone is signed out whatever the server
+            // thinks. Navigate FIRST: awaiting the revoke here would hold the
+            // picker on this screen for up to REQUEST_TIMEOUT_MS (20s) waiting for
+            // a message that only matters when it fails.
             router.replace('/');
+
+            // Awaited only now, when waiting costs nothing: this phone can no
+            // longer authenticate either way. Alert.alert is a native call, so it
+            // still reaches them over the screen they just landed on.
+            if (!(await revoked)) {
+              Alert.alert(
+                'Signed out - one thing to tell your supervisor',
+                'This phone is signed out and cannot clock in. We could not tell the office to take it off your account, so ask your supervisor to remove this phone for you.',
+              );
+            }
           },
         },
       ],

@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 
 import { Icon, type IconName } from '@/components/Icon';
-import { friendlyError } from '@/messages';
+import { friendlyError, isDeregistered } from '@/messages';
 import { apiPost, INSTALL_SECRET_KEY } from '@/native-api';
 import { C } from '@/theme';
 
@@ -165,6 +165,9 @@ export default function NotificationsScreen() {
       setNext(anchorOf(page));
     } catch (e) {
       if (gen !== generation.current) return;
+      // Same as every other screen behind an enrolled device: a revoked phone goes
+      // to setup rather than showing an error it can never clear.
+      if (isDeregistered(e)) { router.replace('/'); return; }
       setError(friendlyError(e));
     } finally {
       if (gen === generation.current) {

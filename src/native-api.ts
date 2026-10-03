@@ -95,7 +95,7 @@ export async function apiPostFile<T>(
     UPLOAD_TIMEOUT_MS,
     'That took too long to send. Check your connection and try again.',
   );
-  await refuseOrThrow(response, result);
+  await refuseOrThrow(response, result, typeof fields.install_secret === 'string' ? fields.install_secret : null);
   return result as T;
 }
 
@@ -122,8 +122,22 @@ export async function apiPost<T>(
     // do is worse than saying nothing.
     'The connection timed out. Check your connection and try again.',
   );
-  await refuseOrThrow(response, result);
+  await refuseOrThrow(response, result, secretFromBody(body));
   return result as T;
+}
+
+/**
+ * The install_secret a request carried, if any.
+ *
+ * Read off the body rather than threaded through every caller: every
+ * authenticated route takes it under this one name, and a route that does not
+ * simply yields null, which refuseOrThrow treats as "cannot tell" and handles
+ * conservatively.
+ */
+function secretFromBody(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const value = (body as Record<string, unknown>).install_secret;
+  return typeof value === 'string' ? value : null;
 }
 
 /**
@@ -162,9 +176,37 @@ export async function apiPost<T>(
  * Deleting is best effort. A keystore that refuses leaves the phone as it was,
  * which is no worse than not trying.
  */
-async function refuseOrThrow(response: Response, result: { error?: string }): Promise<void> {
+async function refuseOrThrow(
+  response: Response,
+  result: { error?: string },
+  /**
+   * The install secret THIS request was sent with.
+   *
+   * Without it, a late answer destroys a credential it knows nothing about.
+   * Sequence: a request goes out on secret A, the phone is revoked, the picker
+   * enrols again and SecureStore now holds secret B -- and only then does the old
+   * 401 arrive. Clearing "whatever is stored" would delete B, the working
+   * credential they just obtained, and send them back to setup from a phone that
+   * was fine. The failure belongs to A and must only be allowed to affect A.
+   */
+  sentSecret: string | null,
+): Promise<void> {
   if (response.ok) return;
   if (result.error === 'device_inactive') {
+    const current = await readEnrolment();
+    if (!current.ok) {
+      // The keystore would not say what is stored, so there is no way to know
+      // whether this failure is still relevant. Destroying nothing is the only
+      // safe answer -- see requireInstallSecret for the same reasoning.
+      throw new Error('enrolment_unreadable');
+    }
+    if (sentSecret && current.secret && current.secret !== sentSecret) {
+      // A newer enrolment replaced the credential this request used. The answer is
+      // about a phone registration that no longer exists, so it is dropped: no
+      // clearing, no navigation. Thrown as device_inactive so the screens stay
+      // quiet about it, exactly as they do for the live case.
+      throw new Error('device_inactive');
+    }
     const cleared = await clearEnrolment();
     if (!cleared) {
       // NAVIGATING HERE WOULD LOOP. index.tsx decides "enrolled" from these two

@@ -8,7 +8,7 @@ import { CameraSheet } from '@/components/CameraSheet';
 import { Icon } from '@/components/Icon';
 import { SourceSheet } from '@/components/SourceSheet';
 import { MAX_UPLOAD_SIDE, isStoragePickerAvailable, pickFromStorage } from '@/image';
-import { DEVICE_ID_KEY, INSTALL_SECRET_KEY, apiPost, apiPostFile, formatPhone, clearKey } from '@/native-api';
+import { DEVICE_ID_KEY, INSTALL_SECRET_KEY, apiPost, apiPostFile, formatPhone, clearKey, requireInstallSecret } from '@/native-api';
 import { type Profile } from '@/profile';
 import { C } from '@/theme';
 
@@ -58,8 +58,7 @@ export default function ProfileScreen() {
     // which left the pull-to-refresh spinner with nothing to drive it.
     setLoading(true);
     try {
-      const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-      if (!secret) throw new Error('device_inactive');
+      const secret = await requireInstallSecret();
       const data = await apiPost<Profile>('/api/mobile/profile', { install_secret: secret });
       if (seq !== loadSeq.current) return;
       setError(null);
@@ -116,8 +115,7 @@ export default function ProfileScreen() {
     sendingRef.current = true;
     setSending(true);
     try {
-      const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-      if (!secret) throw new Error('device_inactive');
+      const secret = await requireInstallSecret();
       await apiPostFile('/api/mobile/profile/photo', { install_secret: secret }, preview);
       // Past this line the photo IS accepted. The reload below is a refresh of
       // this screen, and its failure must never be reported as a failed upload --

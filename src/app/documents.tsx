@@ -2,11 +2,10 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as SecureStore from 'expo-secure-store';
 
 import { Icon } from '@/components/Icon';
 import { MAX_DOCUMENT_SIDE, isStoragePickerAvailable, pickFromStorage } from '@/image';
-import { INSTALL_SECRET_KEY, apiPost, apiPostFile } from '@/native-api';
+import { apiPost, apiPostFile, requireInstallSecret } from '@/native-api';
 import { openRemoteFile, sweepViewedCache } from '@/open-file';
 import { type Profile, type ProfileDocument, expiryState, formatDate } from '@/profile';
 import { C } from '@/theme';
@@ -55,8 +54,7 @@ export default function DocumentsScreen() {
     // which left the pull-to-refresh spinner with nothing to drive it.
     setLoading(true);
     try {
-      const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-      if (!secret) throw new Error('device_inactive');
+      const secret = await requireInstallSecret();
       const data = await apiPost<Profile>('/api/mobile/profile', { install_secret: secret });
       if (seq !== loadSeq.current) return;
       setError(null);
@@ -117,8 +115,7 @@ export default function DocumentsScreen() {
     sendingRef.current = true;
     setSending(true);
     try {
-      const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-      if (!secret) throw new Error('device_inactive');
+      const secret = await requireInstallSecret();
       const sent = await apiPostFile<{ request_id?: string }>(
         '/api/mobile/profile/document',
         { install_secret: secret, doc_type: preview.doc.doc_type },

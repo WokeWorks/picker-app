@@ -185,6 +185,27 @@ async function refuseOrThrow(response: Response, result: { error?: string }): Pr
 }
 
 /**
+ * The install secret, or a trip to setup.
+ *
+ * Every authenticated screen begins by reading this key, and each used to
+ * `throw new Error('device_inactive')` when it was missing. That string is the
+ * one the server sends for a REVOKED device, so the screens' handling of it
+ * assumed apiPost had already cleared the credential and navigated -- which for a
+ * locally-missing secret never happened. No request had run. The result was a
+ * blank screen: spinner gone, no schedule, no error, no way to setup.
+ *
+ * Navigating here makes the assumption true for both paths. A phone with no
+ * secret is not enrolled whatever index.tsx last decided, and setup is the only
+ * screen that can help it.
+ */
+export async function requireInstallSecret(): Promise<string> {
+  const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY).catch(() => null);
+  if (secret) return secret;
+  router.replace('/');
+  throw new Error('device_inactive');
+}
+
+/**
  * Remove this phone's enrolment, and SAY WHETHER IT WORKED.
  *
  * Two deletes, each retried once, then a blanking write as a fallback -- an empty

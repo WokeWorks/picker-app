@@ -6,7 +6,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import { Icon, type IconName } from '@/components/Icon';
 import { friendlyError, isDeregistered } from '@/messages';
-import { apiPost, INSTALL_SECRET_KEY } from '@/native-api';
+import { apiPost, INSTALL_SECRET_KEY, requireInstallSecret } from '@/native-api';
 import { C } from '@/theme';
 
 type Note = {
@@ -120,6 +120,17 @@ export default function NotificationsScreen() {
   // away instead of merging it into a list it never saw.
   const generation = useRef(0);
   const refreshing = useRef(false);
+  /**
+   * Writes sent but not yet acknowledged.
+   *
+   * The focus refresh would otherwise race them: open a notification, which marks
+   * it read locally and navigates, come straight back, and the refresh lands
+   * before the server has stored the read -- so the row returns UNREAD and the
+   * badge goes back up, and stays wrong until something refreshes again. Local
+   * state is already correct and optimistic, so the right move is to let the
+   * write finish rather than re-ask mid-flight.
+   */
+  const pendingWrites = useRef(0);
 
   // Every pending settle/exit timer, dropped. Called before any list replacement
   // and on unmount.
@@ -131,8 +142,7 @@ export default function NotificationsScreen() {
   useEffect(() => clearTimers, [clearTimers]);
 
   const load = useCallback(async (anchor: Anchor = null, which: InboxState = state) => {
-    const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-    if (!secret) throw new Error('device_inactive');
+    const secret = await requireInstallSecret();
     return apiPost<Page>('/api/mobile/notifications', {
       install_secret: secret,
       state: which,
@@ -200,6 +210,10 @@ export default function NotificationsScreen() {
   const focused = useRef(false);
   useFocusEffect(useCallback(() => {
     if (!focused.current) { focused.current = true; return; }
+    // Skipped while a write is in flight. What is on screen is already the
+    // optimistic result of that write, and asking the server now would get the
+    // pre-write answer back and undo it.
+    if (pendingWrites.current > 0) return;
     void refresh();
   }, [refresh]));
 
@@ -268,16 +282,27 @@ export default function NotificationsScreen() {
     if (!secret) return;
     // Applied locally first so the list responds immediately; a failure is
     // corrected by the refresh below rather than by blocking on the round trip.
-    if (action === 'delete') setNotes((prev) => prev.filter((n) => !ids || !ids.includes(n.id)));
+    if (action === 'delete') {
+      // The badge counts UNREAD rows, so removing one has to take it off the
+      // count as well. Without this, deleting an unread notification left the
+      // tab showing a number that included rows no longer in the list, until
+      // something else forced a refresh.
+      const goneUnread = notes.filter((n) => !n.read_at && (!ids || ids.includes(n.id))).length;
+      if (goneUnread) setUnreadCount((c) => Math.max(0, c - goneUnread));
+      setNotes((prev) => prev.filter((n) => !ids || !ids.includes(n.id)));
+    }
     else setNotes((prev) => prev.map((n) => (!ids || ids.includes(n.id) ? { ...n, read_at: n.read_at ?? new Date().toISOString() } : n)));
     setSelected(new Set());
+    pendingWrites.current += 1;
     try {
       await apiPost('/api/mobile/notifications/update', { install_secret: secret, action, ids });
     } catch {
       // Only if this is still the list that asked.
       if (gen === generation.current) void refresh();
+    } finally {
+      pendingWrites.current -= 1;
     }
-  }, [refresh]);
+  }, [refresh, notes]);
 
   /**
    * Start a row's exit from the Unread list: settle, then slide, then drop.
@@ -527,7 +552,14 @@ function ExitShell({ id, exiting, onExited, children }: { id: string; exiting: b
     // Stopped rather than left running: an unmount mid-slide (a refresh landing,
     // or the tab being switched) would otherwise fire the callback against a list
     // that has already been replaced.
-    return () => a.stop();
+    return () => {
+      a.stop();
+      // Reset, not just stopped. stop() leaves anim wherever it got to, so a row
+      // whose exit is cancelled -- a refresh arriving mid-slide -- would render
+      // again still half-faded and shifted left, or invisible if it had almost
+      // finished.
+      anim.setValue(1);
+    };
   }, [exiting, anim, id, onExited]);
 
   return (

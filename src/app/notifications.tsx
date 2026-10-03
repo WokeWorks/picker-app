@@ -1,6 +1,6 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 
@@ -18,6 +18,21 @@ type Note = {
   read_at: string | null;
   created_at: string;
 };
+
+/** Which half of the inbox is on screen. Matches the server's `state`. */
+type InboxState = 'unread' | 'read';
+
+/**
+ * How long a notification stays in the Unread list after being read.
+ *
+ * Not zero, because a row vanishing under the finger that tapped it reads as the
+ * app losing it. Five seconds is long enough to see what happened and short
+ * enough that the list is honest about what is still unread.
+ */
+const SETTLE_MS = 5000;
+
+/** The slide-and-fade once the settle window is up. */
+const EXIT_MS = 260;
 
 type Anchor = { before: string; beforeId: string } | null;
 type Page = {
@@ -61,7 +76,20 @@ function when(iso: string): string {
 }
 
 export default function NotificationsScreen() {
+  const [state, setState] = useState<InboxState>('unread');
   const [notes, setNotes] = useState<Note[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  /**
+   * Rows that have been read but are still on screen, mid-settle or mid-exit.
+   *
+   * Held separately from `notes` so the row keeps its place in the list while it
+   * fades: removing it from `notes` is the LAST step, after the animation, not the
+   * first. Their timers are tracked so a refresh or an unmount can cancel them --
+   * a fired timer against a list that no longer holds the row would be a setState
+   * on nothing, and against a remounted one would delete an innocent row.
+   */
+  const [exiting, setExiting] = useState<Set<string>>(new Set());
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const [next, setNext] = useState<Anchor>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -93,15 +121,25 @@ export default function NotificationsScreen() {
   const generation = useRef(0);
   const refreshing = useRef(false);
 
-  const load = useCallback(async (anchor: Anchor = null) => {
+  // Every pending settle/exit timer, dropped. Called before any list replacement
+  // and on unmount.
+  const clearTimers = useCallback(() => {
+    timers.current.forEach((t) => clearTimeout(t));
+    timers.current.clear();
+  }, []);
+
+  useEffect(() => clearTimers, [clearTimers]);
+
+  const load = useCallback(async (anchor: Anchor = null, which: InboxState = state) => {
     const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
     if (!secret) throw new Error('device_inactive');
     return apiPost<Page>('/api/mobile/notifications', {
       install_secret: secret,
+      state: which,
       before: anchor?.before ?? null,
       before_id: anchor?.beforeId ?? null,
     });
-  }, []);
+  }, [state]);
 
   const anchorOf = (page: Page): Anchor =>
     page.next_before && page.next_before_id
@@ -117,7 +155,13 @@ export default function NotificationsScreen() {
       // Cleared here rather than at the top: setting state synchronously inside
       // an effect triggers a cascading render, and this runs from one on mount.
       setError(null);
+      // Any row mid-settle is about to be replaced by the server's own answer, so
+      // its timer must not outlive this list -- that is what makes "leave the
+      // screen and come back" land the row in Read with no special case.
+      clearTimers();
+      setExiting(new Set());
       setNotes(page.notifications);
+      setUnreadCount(page.unread);
       setNext(anchorOf(page));
     } catch (e) {
       if (gen !== generation.current) return;
@@ -128,7 +172,7 @@ export default function NotificationsScreen() {
         setLoading(false);
       }
     }
-  }, [load]);
+  }, [load, clearTimers]);
 
   // Wraps refresh so the control has something to spin on. The flag is cleared in
   // a finally, so a failed refresh releases the spinner rather than leaving it
@@ -143,6 +187,17 @@ export default function NotificationsScreen() {
   }, [refresh]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // Refetch on every RETURN to the screen, not just on mount. Tapping a
+  // notification pushes /week or /clock on top of this screen, which stays
+  // mounted, so coming back would otherwise show the same list -- including a row
+  // that is now read and belongs in the other half. The first focus is skipped
+  // because the mount effect above has already fetched it.
+  const focused = useRef(false);
+  useFocusEffect(useCallback(() => {
+    if (!focused.current) { focused.current = true; return; }
+    void refresh();
+  }, [refresh]));
 
   // Anchored paging: ask for what is older than the last row held, never "page 3".
   // New notifications arriving at the top cannot shift this and cause a repeat.
@@ -172,6 +227,26 @@ export default function NotificationsScreen() {
     }
   }, [next, loadingMore, load]);
 
+  // Switching half. The list, the anchor and any settle timers all belong to the
+  // half that is leaving, so they go together -- keeping the old rows while the new
+  // page loads would show Read rows under an Unread heading for a moment, and the
+  // stale anchor would page the wrong list.
+  const show = useCallback((which: InboxState) => {
+    if (which === state) return;
+    generation.current++;
+    clearTimers();
+    setExiting(new Set());
+    setSelected(new Set());
+    setNotes([]);
+    setNext(null);
+    setError(null);
+    setLoading(true);
+    setState(which);
+  }, [state, clearTimers]);
+
+  // state changes, so `load` changes, so `refresh` changes, so the mount effect
+  // above re-runs and fetches the new half. Nothing else to schedule here.
+
   const act = useCallback(async (action: 'read' | 'delete', ids?: string[]) => {
     const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
     if (!secret) return;
@@ -187,12 +262,65 @@ export default function NotificationsScreen() {
     }
   }, [refresh]);
 
+  /**
+   * Start a row's exit from the Unread list: settle, then slide, then drop.
+   *
+   * Only in the unread half -- in Read there is nowhere for it to go. The read mark
+   * itself has already been sent by `act`; this is purely how the row leaves.
+   */
+  const settleOut = useCallback((id: string) => {
+    if (state !== 'unread' || timers.current.has(id)) return;
+    const t = setTimeout(() => {
+      timers.current.delete(id);
+      // Hands the row to the animation. It removes itself when that finishes, via
+      // onExited below, so the gap never closes before the row has gone.
+      setExiting((prev) => new Set(prev).add(id));
+    }, SETTLE_MS);
+    timers.current.set(id, t);
+  }, [state]);
+
+  // The last step, once the slide has played out.
+  const dropRow = useCallback((id: string) => {
+    setNotes((prev) => prev.filter((n) => n.id !== id));
+    setExiting((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  /**
+   * THE one way rows become read. Every caller goes through it -- a single tap,
+   * "Mark read" on a selection, "Mark all read" -- so all three colour the rows,
+   * hold them for the settle, then slide them out identically.
+   *
+   * No refetch here, deliberately. "Mark all read" used to call act('read') and
+   * refresh() together and that was a race with a visible symptom: the refetch
+   * frequently won, replacing the rows just marked read locally with the server's
+   * copies, still unread because the mark had not landed yet. The list stayed
+   * unread-coloured and the rows then jumped to Read a moment later. The server is
+   * told once; the focus refetch reconciles when they next come back.
+   */
+  const markRead = useCallback((ids: string[]) => {
+    // Already-read ids are dropped: they have no colour left to change, and
+    // settling one again would restart a timer against a row mid-slide.
+    const unread = notes.filter((n) => !n.read_at && ids.includes(n.id)).map((n) => n.id);
+    if (!unread.length) return;
+    setUnreadCount((n) => Math.max(0, n - unread.length));
+    // Explicit ids, never "all": the rows that slide out are then exactly the rows
+    // that were marked. Anything unread on a page not yet loaded stays unread,
+    // which is honest -- it is still in the list, just further down.
+    void act('read', unread);
+    unread.forEach(settleOut);
+  }, [notes, act, settleOut]);
+
   const openNote = useCallback((note: Note) => {
-    if (!note.read_at) void act('read', [note.id]);
+    if (!note.read_at) markRead([note.id]);
     const screen = typeof note.data?.screen === 'string' ? note.data.screen : null;
     if (screen === 'week') router.push('/week');
     else if (screen === 'clock') router.push('/clock');
-  }, [act]);
+  }, [markRead]);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -211,15 +339,19 @@ export default function NotificationsScreen() {
         </Pressable>
         {selecting ? (
           <View style={styles.bulk}>
-            <Pressable accessibilityRole="button" onPress={() => void act('read', [...selected])} hitSlop={8}>
+            <Pressable accessibilityRole="button" onPress={() => markRead([...selected])} hitSlop={8}>
               <Text style={styles.bulkText}>Mark read</Text>
             </Pressable>
             <Pressable accessibilityRole="button" onPress={() => void act('delete', [...selected])} hitSlop={8}>
               <Text style={[styles.bulkText, styles.bulkDanger]}>Remove</Text>
             </Pressable>
           </View>
-        ) : notes.some((n) => !n.read_at) ? (
-          <Pressable accessibilityRole="button" onPress={() => void act('read')} hitSlop={8}>
+        ) : state === 'unread' && notes.some((n) => !n.read_at) ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => markRead(notes.filter((n) => !n.read_at).map((n) => n.id))}
+            hitSlop={8}
+          >
             <Text style={styles.bulkText}>Mark all read</Text>
           </Pressable>
         ) : null}
@@ -228,6 +360,40 @@ export default function NotificationsScreen() {
       <Text style={styles.title} accessibilityRole="header">
         {selecting ? `${selected.size} selected` : 'Notifications'}
       </Text>
+
+      {/* The two halves. Unread is what the screen opens on; Read is the archive.
+          Hidden while selecting, because switching half mid-selection would carry a
+          selection across a list that no longer contains it. */}
+      {!selecting && (
+        <View style={styles.tabs}>
+          {(['unread', 'read'] as const).map((which) => {
+            const on = state === which;
+            return (
+              <Pressable
+                key={which}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={which === 'unread'
+                  ? `Unread notifications${unreadCount ? `, ${unreadCount}` : ''}`
+                  : 'Notifications you have already read'}
+                onPress={() => show(which)}
+                style={({ pressed }) => [styles.tab, on && styles.tabOn, pressed && !on && { backgroundColor: C.pressed }]}
+              >
+                <Text style={[styles.tabText, on && styles.tabTextOn]}>
+                  {which === 'unread' ? 'Unread' : 'Read'}
+                </Text>
+                {/* The count rides on the Unread tab, so the badge they saw on the
+                    clock screen is explained by the thing they tapped into. */}
+                {which === 'unread' && unreadCount > 0 && (
+                  <View style={[styles.tabCount, on && styles.tabCountOn]}>
+                    <Text style={[styles.tabCountText, on && styles.tabCountTextOn]}>{unreadCount}</Text>
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
 
       {loading ? (
         <View style={styles.centre}><ActivityIndicator color={C.brand} size="large" /></View>
@@ -262,13 +428,18 @@ export default function NotificationsScreen() {
           ListEmptyComponent={
             <View style={styles.centre}>
               <Icon name="check" size={34} color={C.faint} strokeWidth={2} />
-              <Text style={styles.empty}>Nothing yet.{'\n'}Changes to your roster will show up here.</Text>
+              <Text style={styles.empty}>
+                {state === 'unread'
+                  ? 'Nothing new.\nAnything you have read is under Read.'
+                  : 'Nothing read yet.\nMessages move here once you open them.'}
+              </Text>
             </View>
           }
           ListFooterComponent={loadingMore ? <ActivityIndicator style={styles.more} color={C.brand} /> : null}
           renderItem={({ item }) => {
             const isSelected = selected.has(item.id);
             return (
+              <ExitShell id={item.id} exiting={exiting.has(item.id)} onExited={dropRow}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`${item.title}. ${item.body}. ${when(item.created_at)}`}
@@ -297,11 +468,54 @@ export default function NotificationsScreen() {
                 </View>
                 {!item.read_at && !isSelected && <View style={styles.dot} />}
               </Pressable>
+              </ExitShell>
             );
           }}
         />
       )}
     </SafeAreaView>
+  );
+}
+
+/**
+ * Plays a row out of the list, then tells the parent to remove it.
+ *
+ * Opacity and translateX only -- both run on the compositor, so the slide stays
+ * smooth on the cheap phones this app targets. Height is deliberately NOT animated:
+ * collapsing it needs the measured height and behaves differently across RN
+ * versions, and the gap closing a fraction after the row has gone is not something
+ * anyone notices.
+ */
+function ExitShell({ id, exiting, onExited, children }: { id: string; exiting: boolean; onExited: (id: string) => void; children: React.ReactNode }) {
+  // useState, not useRef: the value must survive re-renders but is also read while
+  // rendering (the style below), and reading a ref during render is exactly what
+  // react-hooks/refs forbids. The initialiser runs once, so this is still one
+  // Animated.Value for the life of the row.
+  const [anim] = useState(() => new Animated.Value(1));
+
+  // `id` and a STABLE `onExited` rather than a closure: a fresh `() => drop(id)`
+  // on every render would be a new dependency every time and restart the
+  // animation mid-slide.
+  useEffect(() => {
+    if (!exiting) return;
+    const a = Animated.timing(anim, { toValue: 0, duration: EXIT_MS, useNativeDriver: true });
+    a.start(({ finished }) => { if (finished) onExited(id); });
+    // Stopped rather than left running: an unmount mid-slide (a refresh landing,
+    // or the tab being switched) would otherwise fire the callback against a list
+    // that has already been replaced.
+    return () => a.stop();
+  }, [exiting, anim, id, onExited]);
+
+  return (
+    <Animated.View
+      style={{
+        opacity: anim,
+        transform: [{ translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [-36, 0] }) }],
+      }}
+      pointerEvents={exiting ? 'none' : 'auto'}
+    >
+      {children}
+    </Animated.View>
   );
 }
 
@@ -313,6 +527,19 @@ const styles = StyleSheet.create({
   bulk: { flexDirection: 'row', gap: 18 },
   bulkText: { color: C.brand, fontSize: 15, fontWeight: '700' },
   bulkDanger: { color: C.danger },
+  tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingBottom: 14 },
+  tab: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    paddingVertical: 8, paddingHorizontal: 16, borderRadius: 999,
+    borderWidth: 1.5, borderColor: C.line, backgroundColor: C.paper,
+  },
+  tabOn: { borderColor: C.brand, backgroundColor: C.brand },
+  tabText: { color: C.inkMid, fontSize: 14, fontWeight: '700' },
+  tabTextOn: { color: C.onBrand },
+  tabCount: { minWidth: 20, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 999, backgroundColor: C.brandTint, alignItems: 'center' },
+  tabCountOn: { backgroundColor: C.brandDeep },
+  tabCountText: { color: C.brand, fontSize: 12, fontWeight: '800' },
+  tabCountTextOn: { color: C.onBrand },
   title: { color: C.ink, fontSize: 28, fontWeight: '800', letterSpacing: -0.5, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 12 },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 40, paddingTop: 60 },
   empty: { color: C.muted, fontSize: 15, textAlign: 'center', lineHeight: 22 },

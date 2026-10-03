@@ -8,7 +8,7 @@ import { CameraSheet } from '@/components/CameraSheet';
 import { Icon } from '@/components/Icon';
 import { SourceSheet } from '@/components/SourceSheet';
 import { MAX_UPLOAD_SIDE, isStoragePickerAvailable, pickFromStorage } from '@/image';
-import { DEVICE_ID_KEY, INSTALL_SECRET_KEY, apiPost, apiPostFile, formatPhone } from '@/native-api';
+import { DEVICE_ID_KEY, INSTALL_SECRET_KEY, apiPost, apiPostFile, formatPhone, clearKey } from '@/native-api';
 import { type Profile } from '@/profile';
 import { C } from '@/theme';
 
@@ -66,10 +66,14 @@ export default function ProfileScreen() {
       setProfile(data);
     } catch (e) {
       if (seq !== loadSeq.current) return;
-      // Deregistered goes to setup rather than showing a message about a state
-      // the picker cannot leave from here. The credential is already gone by now
-      // (apiPost), so '/' renders setup instead of returning to this screen.
-      if (e instanceof Error && e.message === 'device_inactive') { router.replace('/'); return; }
+      // apiPost has already cleared the credential and navigated to setup; an
+      // error here would sit on top of that screen. The stuck case did NOT
+      // navigate (it would loop), so it still needs saying.
+      if (e instanceof Error && e.message === 'device_inactive') return;
+      if (e instanceof Error && e.message === 'deregistered_stuck') {
+        setError('This phone has been removed from your account. Show this to your supervisor.');
+        return;
+      }
       setError('Could not load your details. Pull down to try again.');
     } finally {
       if (seq === loadSeq.current) setLoading(false);
@@ -454,39 +458,6 @@ export default function ProfileScreen() {
   );
 }
 
-/**
- * Clear one SecureStore key: delete, retry, then blank it.
- *
- * The blanking step is the one that matters. Every reader of these keys tests
- * TRUTHINESS, and readEnrolment() in native-api.ts normalises an empty string to
- * null, so a blanked key reads exactly like a missing one everywhere it is used.
- *
- * That turns the one state with no way out into a recoverable one. If the device
- * id survives while the secret is gone, a cold start routes straight back to
- * /clock and every call there fails; "close and reopen the app" does not help,
- * because index.tsx reads the same key again and does the same thing. Writing an
- * empty value is a second, independent way to reach the same result, and a
- * keystore that refuses a delete may well accept a write.
- *
- * One retry before that, not a loop: if a delete fails twice it is not transient,
- * and the picker should be told rather than held at a spinner.
- */
-async function clearKey(key: string): Promise<boolean> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      await SecureStore.deleteItemAsync(key);
-      return true;
-    } catch {
-      // Fall through to the retry, then to the blanking fallback below.
-    }
-  }
-  try {
-    await SecureStore.setItemAsync(key, '');
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function Field({ label, value }: { label: string; value: string }) {
   return (

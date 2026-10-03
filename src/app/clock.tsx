@@ -14,7 +14,7 @@ import { demoSession, type DemoState } from '@/demo';
 import { CameraSheet } from '@/components/CameraSheet';
 import { requestIntegrityToken } from '@/integrity';
 import { registerForReminders } from '@/notifications';
-import { friendlyError, isDeregistered } from '@/messages';
+import { friendlyError, isDeregistered, isDeregisteredStuck } from '@/messages';
 import { C } from '@/theme';
 import { apiPost, apiPostFile, INSTALL_SECRET_KEY } from '@/native-api';
 
@@ -61,11 +61,17 @@ export default function ClockScreen() {
     setLoading(true);
     refresh()
       .catch((error) => {
-        // A revoked phone is sent to setup instead of being shown an error it can
-        // do nothing about. apiPost has already dropped the credential, so '/'
-        // reads an unenrolled phone and renders the setup screen rather than
-        // bouncing straight back here.
-        if (isDeregistered(error)) { router.replace('/'); return; }
+        // apiPost has already cleared the credential AND navigated to setup, so
+        // there is nothing to do but stay quiet. Alerting would put a box over the
+        // setup screen about a shift that is no longer this phone's business.
+        if (isDeregistered(error)) return;
+        // The one case that did NOT navigate, because it could not: the keystore
+        // refused to give up the credential, so '/' would bounce straight back
+        // here. Say so instead of looping.
+        if (isDeregisteredStuck(error)) {
+          Alert.alert('This phone has been removed', friendlyError(error));
+          return;
+        }
         Alert.alert('Could not load your shift', friendlyError(error));
       })
       .finally(() => setLoading(false));

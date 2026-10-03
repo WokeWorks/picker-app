@@ -52,7 +52,8 @@ export default function WeekScreen() {
       if (!installSecret) throw new Error('device_inactive');
       setWeek(await apiPost<Week>('/api/mobile/week', { install_secret: installSecret, week: which }));
     } catch (e) {
-      if (isDeregistered(e)) { router.replace('/'); return; }
+      // apiPost already cleared the credential and navigated to setup.
+      if (isDeregistered(e)) return;
       setWeek(null);
       setError(friendlyError(e));
     } finally {

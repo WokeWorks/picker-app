@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 import { File } from 'expo-file-system';
 
@@ -164,12 +165,65 @@ export async function apiPost<T>(
 async function refuseOrThrow(response: Response, result: { error?: string }): Promise<void> {
   if (response.ok) return;
   if (result.error === 'device_inactive') {
-    await Promise.all([
-      SecureStore.deleteItemAsync(INSTALL_SECRET_KEY).catch(() => {}),
-      SecureStore.deleteItemAsync(DEVICE_ID_KEY).catch(() => {}),
-    ]);
+    const cleared = await clearEnrolment();
+    if (!cleared) {
+      // NAVIGATING HERE WOULD LOOP. index.tsx decides "enrolled" from these two
+      // keys, so sending a phone that still holds them to '/' bounces straight
+      // back to /clock, which asks again, gets device_inactive again, and round
+      // it goes. The picker is told instead -- a stuck keystore is rare, and a
+      // sentence they can show a supervisor beats a screen that flickers.
+      throw new Error('deregistered_stuck');
+    }
+    // CENTRAL, so no caller can forget. The load paths route themselves anyway,
+    // but the ACTION paths -- punch, break, sending a document or a photo -- used
+    // to show an alert and leave a revoked picker sitting in the clock or upload
+    // UI with no way out. Doing it here covers every call that exists now and
+    // every one added later.
+    router.replace('/');
   }
   throw new Error(result.error || `Request failed (${response.status})`);
+}
+
+/**
+ * Remove this phone's enrolment, and SAY WHETHER IT WORKED.
+ *
+ * Two deletes, each retried once, then a blanking write as a fallback -- an empty
+ * string reads as not-enrolled everywhere (see isEnrolled), so a keystore that
+ * refuses deletes can still be talked out of claiming this phone is registered.
+ * The boolean is what callers need: whether it is safe to send the picker to
+ * setup, or whether doing so would loop.
+ *
+ * Both keys matter and they do different jobs. INSTALL_SECRET_KEY authenticates
+ * every call; DEVICE_ID_KEY is what index.tsx and LockGate read to decide this
+ * phone is enrolled -- leaving that behind sends the picker to a clock screen
+ * whose every request then fails.
+ */
+export async function clearEnrolment(): Promise<boolean> {
+  const results = await Promise.all([clearKey(INSTALL_SECRET_KEY), clearKey(DEVICE_ID_KEY)]);
+  return results.every(Boolean);
+}
+
+/**
+ * Delete one key, retried once, then blanked.
+ *
+ * One retry, not a loop: a delete that fails twice is not transient, and the
+ * picker should be told rather than held at a spinner.
+ */
+export async function clearKey(key: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await SecureStore.deleteItemAsync(key);
+      return true;
+    } catch {
+      // Fall through to the retry, then to the blanking fallback below.
+    }
+  }
+  try {
+    await SecureStore.setItemAsync(key, '');
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function withTimeout(

@@ -167,7 +167,8 @@ export default function NotificationsScreen() {
       if (gen !== generation.current) return;
       // Same as every other screen behind an enrolled device: a revoked phone goes
       // to setup rather than showing an error it can never clear.
-      if (isDeregistered(e)) { router.replace('/'); return; }
+      // apiPost already cleared the credential and navigated to setup.
+      if (isDeregistered(e)) return;
       setError(friendlyError(e));
     } finally {
       if (gen === generation.current) {
@@ -226,7 +227,10 @@ export default function NotificationsScreen() {
       // Silent: they still have everything already loaded, and an alert on scroll
       // would be worse than a page that simply stops.
     } finally {
-      setLoadingMore(false);
+      // Only the request that is still current may clear the flag. An abandoned
+      // page settling later would otherwise switch off a spinner belonging to the
+      // tab that replaced it.
+      if (gen === generation.current) setLoadingMore(false);
     }
   }, [next, loadingMore, load]);
 
@@ -243,6 +247,10 @@ export default function NotificationsScreen() {
     setNotes([]);
     setNext(null);
     setError(null);
+    // Belongs to the half that is leaving. Left set, the new tab shows a footer
+    // spinner it never started and loadMore refuses to fetch anything until the
+    // abandoned request settles.
+    setLoadingMore(false);
     setLoading(true);
     setState(which);
   }, [state, clearTimers]);
@@ -251,6 +259,11 @@ export default function NotificationsScreen() {
   // above re-runs and fetches the new half. Nothing else to schedule here.
 
   const act = useCallback(async (action: 'read' | 'delete', ids?: string[]) => {
+    // The generation this request belongs to. Its failure path refreshes, and a
+    // refresh that lands after a tab switch would fill the NEW tab with the OLD
+    // tab's rows -- Read rows under an Unread heading. Captured here rather than
+    // read in the catch, which would already be the new value.
+    const gen = generation.current;
     const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
     if (!secret) return;
     // Applied locally first so the list responds immediately; a failure is
@@ -261,7 +274,8 @@ export default function NotificationsScreen() {
     try {
       await apiPost('/api/mobile/notifications/update', { install_secret: secret, action, ids });
     } catch {
-      void refresh();
+      // Only if this is still the list that asked.
+      if (gen === generation.current) void refresh();
     }
   }, [refresh]);
 
@@ -308,7 +322,14 @@ export default function NotificationsScreen() {
   const markRead = useCallback((ids: string[]) => {
     // Already-read ids are dropped: they have no colour left to change, and
     // settling one again would restart a timer against a row mid-slide.
-    const unread = notes.filter((n) => !n.read_at && ids.includes(n.id)).map((n) => n.id);
+    // `!timers.current.has(n.id)` is the part that stops a double count. `notes`
+    // is a closure, so a second press before React has re-rendered still sees the
+    // row as unread and would decrement again -- reading one row twice took 10 to
+    // 8. A pending settle timer is the durable record that this row has already
+    // been marked, and it is set synchronously.
+    const unread = notes
+      .filter((n) => !n.read_at && !timers.current.has(n.id) && ids.includes(n.id))
+      .map((n) => n.id);
     if (!unread.length) return;
     setUnreadCount((n) => Math.max(0, n - unread.length));
     // Explicit ids, never "all": the rows that slide out are then exactly the rows

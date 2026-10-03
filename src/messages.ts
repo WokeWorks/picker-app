@@ -20,6 +20,7 @@ const MESSAGES: Record<string, string> = {
   invalid_challenge: 'Something went wrong. Try again.',
   device_inactive: 'This phone is no longer registered. Ask your admin for a new setup code.',
   service_unavailable: 'The office system is not responding. Try again in a moment.',
+  deregistered_stuck: 'This phone has been removed from your account, but it could not clear its own setup. Show this to your supervisor.',
   employee_inactive: 'Your account is not active. Ask your supervisor.',
   // Setup
   invalid_code: 'That setup code is not valid. Check the 8 digits and try again.',
@@ -57,4 +58,15 @@ export function friendlyError(error: unknown): string {
  */
 export function isDeregistered(error: unknown): boolean {
   return error instanceof Error && error.message === 'device_inactive';
+}
+
+/**
+ * The deregistered case that could NOT clean itself up.
+ *
+ * Kept separate from isDeregistered because the handling is opposite: that one is
+ * already on its way to setup and needs no error, while this one must stay put and
+ * say something, since navigating would loop through index.tsx and back.
+ */
+export function isDeregisteredStuck(error: unknown): boolean {
+  return error instanceof Error && error.message === 'deregistered_stuck';
 }

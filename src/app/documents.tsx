@@ -63,10 +63,14 @@ export default function DocumentsScreen() {
       setProfile(data);
     } catch (e) {
       if (seq !== loadSeq.current) return;
-      // Deregistered goes to setup rather than showing a message about a state
-      // the picker cannot leave from here. The credential is already gone by now
-      // (apiPost), so '/' renders setup instead of returning to this screen.
-      if (e instanceof Error && e.message === 'device_inactive') { router.replace('/'); return; }
+      // apiPost has already cleared the credential and navigated to setup; an
+      // error here would sit on top of that screen. The stuck case did NOT
+      // navigate (it would loop), so it still needs saying.
+      if (e instanceof Error && e.message === 'device_inactive') return;
+      if (e instanceof Error && e.message === 'deregistered_stuck') {
+        setError('This phone has been removed from your account. Show this to your supervisor.');
+        return;
+      }
       setError('Could not load your documents. Pull down to try again.');
     } finally {
       if (seq === loadSeq.current) setLoading(false);

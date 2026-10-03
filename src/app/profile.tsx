@@ -8,8 +8,9 @@ import { CameraSheet } from '@/components/CameraSheet';
 import { Icon } from '@/components/Icon';
 import { SourceSheet } from '@/components/SourceSheet';
 import { MAX_UPLOAD_SIDE, isStoragePickerAvailable, pickFromStorage } from '@/image';
-import { DEVICE_ID_KEY, INSTALL_SECRET_KEY, apiPost, apiPostFile, formatPhone } from '@/native-api';
-import { type Profile, describeWait } from '@/profile';
+import { DEVICE_ID_KEY, INSTALL_SECRET_KEY, apiPost, apiPostFile, formatPhone, clearKey, requireInstallSecret } from '@/native-api';
+import { friendlyError } from '@/messages';
+import { type Profile } from '@/profile';
 import { C } from '@/theme';
 
 /**
@@ -58,17 +59,29 @@ export default function ProfileScreen() {
     // which left the pull-to-refresh spinner with nothing to drive it.
     setLoading(true);
     try {
-      const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-      if (!secret) throw new Error('device_inactive');
+      const secret = await requireInstallSecret();
       const data = await apiPost<Profile>('/api/mobile/profile', { install_secret: secret });
       if (seq !== loadSeq.current) return;
       setError(null);
       setProfile(data);
     } catch (e) {
       if (seq !== loadSeq.current) return;
-      setError(e instanceof Error && e.message === 'device_inactive'
-        ? 'This phone is no longer set up. Ask your supervisor.'
-        : 'Could not load your details. Pull down to try again.');
+      // apiPost has already cleared the credential and navigated to setup; an
+      // error here would sit on top of that screen. The stuck case did NOT
+      // navigate (it would loop), so it still needs saying.
+      if (e instanceof Error && e.message === 'device_inactive') return;
+      if (e instanceof Error && e.message === 'deregistered_stuck') {
+        setError('This phone has been removed from your account. Show this to your supervisor.');
+        return;
+      }
+      // A keystore that could not be READ is retryable and says how: the generic
+      // "pull down to try again" below is true but omits the one thing that
+      // usually clears it.
+      if (e instanceof Error && e.message === 'enrolment_unreadable') {
+        setError(friendlyError(e));
+        return;
+      }
+      setError('Could not load your details. Pull down to try again.');
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
@@ -110,8 +123,7 @@ export default function ProfileScreen() {
     sendingRef.current = true;
     setSending(true);
     try {
-      const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-      if (!secret) throw new Error('device_inactive');
+      const secret = await requireInstallSecret();
       await apiPostFile('/api/mobile/profile/photo', { install_secret: secret }, preview);
       // Past this line the photo IS accepted. The reload below is a refresh of
       // this screen, and its failure must never be reported as a failed upload --
@@ -150,14 +162,33 @@ export default function ProfileScreen() {
             // already gone.
             const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY).catch(() => null);
 
-            // Started, NOT awaited. Even a bounded wait is time in which this
-            // phone is still signed in, and the reason to tap this is that it is
-            // being handed to somebody else. A supervisor can revoke the device
-            // from the dashboard; a secret left on a phone they no longer hold
-            // cannot be undone.
-            if (secret) {
-              void apiPost('/api/mobile/profile/sign-out', { install_secret: secret }).catch(() => {});
-            }
+            // Started now, OUTCOME CHECKED LATER. Both halves of that matter.
+            //
+            // Not awaited here, because the local wipe below must not wait on the
+            // network: the reason to tap this is that the phone is being handed to
+            // somebody else, and a secret still on it is the thing that cannot be
+            // undone.
+            //
+            // But the result is no longer THROWN AWAY, which is what the previous
+            // `.catch(() => {})` did. Measured on sandbox 2026-10-02: a picker
+            // signed out, was shown success, and the device row stayed
+            // status='active' with revoked_at null -- last_used_at was NEVER, so
+            // the call had not reached the server even once. Nobody learned that:
+            // not the picker, not the supervisor whose device list still showed the
+            // phone in use, not us.
+            //
+            // That is a security gap and not only bookkeeping. An active row means
+            // the credential still authenticates, so a copy of it recovered from a
+            // backup or a cloned install keeps working until a human happens to
+            // revoke the device by hand. And it is unrecoverable by design: the
+            // secret is wiped a few lines down, so no retry is ever possible.
+            // The one thing left is to TELL somebody, which is what the alert at
+            // the end now does.
+            const revoked = secret
+              ? apiPost('/api/mobile/profile/sign-out', { install_secret: secret })
+                  .then(() => true)
+                  .catch(() => false)
+              : Promise.resolve(false);
 
             // BOTH keys, each retried once, and nothing is assumed about which
             // matters more. They do different jobs and both have to go:
@@ -193,7 +224,21 @@ export default function ProfileScreen() {
               );
               return;
             }
+            // The keys are gone, so this phone is signed out whatever the server
+            // thinks. Navigate FIRST: awaiting the revoke here would hold the
+            // picker on this screen for up to REQUEST_TIMEOUT_MS (20s) waiting for
+            // a message that only matters when it fails.
             router.replace('/');
+
+            // Awaited only now, when waiting costs nothing: this phone can no
+            // longer authenticate either way. Alert.alert is a native call, so it
+            // still reaches them over the screen they just landed on.
+            if (!(await revoked)) {
+              Alert.alert(
+                'Signed out - one thing to tell your supervisor',
+                'This phone is signed out and cannot clock in. We could not tell the office to take it off your account, so ask your supervisor to remove this phone for you.',
+              );
+            }
           },
         },
       ],
@@ -255,7 +300,6 @@ export default function ProfileScreen() {
                 {photo?.url && (
                   <>
                     <View>
-                      <Text style={styles.photoLabel}>In use now</Text>
                       <Image source={{ uri: photo.url }} style={styles.photo} accessibilityLabel="Your photo in use now" />
                     </View>
                     {waiting && <Icon name="arrowRight" size={20} color={C.muted} strokeWidth={2} />}
@@ -286,33 +330,29 @@ export default function ProfileScreen() {
               </View>
 
               {waiting ? (
-                <View style={styles.pendingBanner}>
-                  <Icon name="hourglass" size={17} color={C.amber} strokeWidth={2} />
-                  <Text style={styles.pendingText}>
-                    {/* Only true when there IS one in use. On a first upload the
-                        reassurance is the opposite: nothing has been replaced
-                        because there was nothing there. */}
-                    {describeWait(waiting.submitted_at)}{photo?.url
-                      ? ' Your photo in use has not changed.'
-                      : ' It will be used once your supervisor approves it.'}
-                  </Text>
+                /* Same inert control as a document in review (documents.tsx), in
+                   the place the action button occupies, so both screens say
+                   "waiting on your supervisor" the same way. A plain View: there
+                   is nothing to press. */
+                <View
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: true }}
+                  accessibilityLabel="Your new photo is being checked by your supervisor"
+                  style={[styles.secondary, styles.inReview]}
+                >
+                  <Icon name="hourglass" size={18} color={C.amber} strokeWidth={2} />
+                  <Text style={styles.inReviewText}>In review</Text>
                 </View>
               ) : (
-                <Text style={styles.help}>
-                  This is the photo every clock-in is checked against.
-                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setChooserOpen(true)}
+                  style={({ pressed }) => [styles.secondary, pressed && styles.secondaryPressed]}
+                >
+                  <Icon name="upload" size={18} color={C.brand} strokeWidth={2} />
+                  <Text style={styles.secondaryText}>Change your photo</Text>
+                </Pressable>
               )}
-
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setChooserOpen(true)}
-                style={({ pressed }) => [styles.secondary, pressed && styles.secondaryPressed]}
-              >
-                <Icon name="upload" size={18} color={C.brand} strokeWidth={2} />
-                {/* Different words when something is already waiting, because
-                    "Change photo" there would suggest the first one is stuck. */}
-                <Text style={styles.secondaryText}>{waiting ? 'Take a different photo' : 'Change your photo'}</Text>
-              </Pressable>
             </View>
 
             {/* ── Read-only details ─────────────────────────────────────── */}
@@ -321,11 +361,6 @@ export default function ProfileScreen() {
               <Field label="Name" value={profile.name || '—'} />
               <View style={styles.divider} />
               <Field label="Phone" value={profile.phone ? formatPhone(profile.phone) : '—'} />
-              <Text style={styles.help}>
-                {/* Says who to ask, instead of leaving them wondering why they
-                    cannot edit their own name. */}
-                Ask your supervisor if either of these is wrong.
-              </Text>
             </View>
 
             {/* ── Documents ─────────────────────────────────────────────── */}
@@ -429,39 +464,6 @@ export default function ProfileScreen() {
   );
 }
 
-/**
- * Clear one SecureStore key: delete, retry, then blank it.
- *
- * The blanking step is the one that matters. Every reader of these keys tests
- * TRUTHINESS, and readEnrolment() in native-api.ts normalises an empty string to
- * null, so a blanked key reads exactly like a missing one everywhere it is used.
- *
- * That turns the one state with no way out into a recoverable one. If the device
- * id survives while the secret is gone, a cold start routes straight back to
- * /clock and every call there fails; "close and reopen the app" does not help,
- * because index.tsx reads the same key again and does the same thing. Writing an
- * empty value is a second, independent way to reach the same result, and a
- * keystore that refuses a delete may well accept a write.
- *
- * One retry before that, not a loop: if a delete fails twice it is not transient,
- * and the picker should be told rather than held at a spinner.
- */
-async function clearKey(key: string): Promise<boolean> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      await SecureStore.deleteItemAsync(key);
-      return true;
-    } catch {
-      // Fall through to the retry, then to the blanking fallback below.
-    }
-  }
-  try {
-    await SecureStore.setItemAsync(key, '');
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -476,9 +478,9 @@ function Field({ label, value }: { label: string; value: string }) {
 function documentSummary(profile: Profile): string {
   const waiting = profile.documents.filter((d) => d.pending).length;
   const missing = profile.documents.filter((d) => d.required && !d.has_current && !d.pending).length;
-  if (waiting && missing) return `${waiting} being checked · ${missing} still needed`;
-  if (waiting) return `${waiting} being checked`;
-  if (missing) return `${missing} still needed`;
+  if (waiting && missing) return `${waiting} review pending · ${missing} upload pending`;
+  if (waiting) return `${waiting} review pending`;
+  if (missing) return `${missing} upload pending`;
   return 'All up to date';
 }
 
@@ -512,9 +514,8 @@ const styles = StyleSheet.create({
   photoEmpty: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line },
   photoWaiting: { borderWidth: 2, borderColor: C.amber },
 
-  pendingBanner: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', backgroundColor: C.amberBg, borderRadius: 12, padding: 12 },
-  pendingText: { flex: 1, color: C.ink, fontSize: 14, lineHeight: 20 },
-  help: { color: C.muted, fontSize: 13, lineHeight: 19 },
+  inReview: { borderColor: C.amber, backgroundColor: C.amberBg },
+  inReviewText: { color: C.amber, fontSize: 15, fontWeight: '700' },
 
   field: { gap: 3 },
   fieldLabel: { color: C.muted, fontSize: 13 },

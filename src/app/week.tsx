@@ -2,14 +2,13 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as SecureStore from 'expo-secure-store';
 
 import { Icon } from '@/components/Icon';
 import { duration } from '@/components/ShiftProgress';
 import { fmtTime } from '@/components/StoreCard';
 import { hasPin, openDirections } from '@/maps';
-import { friendlyError } from '@/messages';
-import { apiPost, INSTALL_SECRET_KEY } from '@/native-api';
+import { friendlyError, isDeregistered } from '@/messages';
+import { apiPost, requireInstallSecret } from '@/native-api';
 import { C } from '@/theme';
 import { demoWeek, type Week, type WeekDay } from '@/week';
 
@@ -48,10 +47,11 @@ export default function WeekScreen() {
     setError(null);
     try {
       if (demo) { setWeek(demoWeek(which)); return; }
-      const installSecret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-      if (!installSecret) throw new Error('device_inactive');
+      const installSecret = await requireInstallSecret();
       setWeek(await apiPost<Week>('/api/mobile/week', { install_secret: installSecret, week: which }));
     } catch (e) {
+      // apiPost already cleared the credential and navigated to setup.
+      if (isDeregistered(e)) return;
       setWeek(null);
       setError(friendlyError(e));
     } finally {

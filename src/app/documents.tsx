@@ -2,13 +2,13 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as SecureStore from 'expo-secure-store';
 
 import { Icon } from '@/components/Icon';
 import { MAX_DOCUMENT_SIDE, isStoragePickerAvailable, pickFromStorage } from '@/image';
-import { INSTALL_SECRET_KEY, apiPost, apiPostFile } from '@/native-api';
+import { apiPost, apiPostFile, requireInstallSecret } from '@/native-api';
+import { friendlyError } from '@/messages';
 import { openRemoteFile, sweepViewedCache } from '@/open-file';
-import { type Profile, type ProfileDocument, describeWait, expiryState, formatDate } from '@/profile';
+import { type Profile, type ProfileDocument, expiryState, formatDate } from '@/profile';
 import { C } from '@/theme';
 
 /**
@@ -55,17 +55,29 @@ export default function DocumentsScreen() {
     // which left the pull-to-refresh spinner with nothing to drive it.
     setLoading(true);
     try {
-      const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-      if (!secret) throw new Error('device_inactive');
+      const secret = await requireInstallSecret();
       const data = await apiPost<Profile>('/api/mobile/profile', { install_secret: secret });
       if (seq !== loadSeq.current) return;
       setError(null);
       setProfile(data);
     } catch (e) {
       if (seq !== loadSeq.current) return;
-      setError(e instanceof Error && e.message === 'device_inactive'
-        ? 'This phone is no longer set up. Ask your supervisor.'
-        : 'Could not load your documents. Pull down to try again.');
+      // apiPost has already cleared the credential and navigated to setup; an
+      // error here would sit on top of that screen. The stuck case did NOT
+      // navigate (it would loop), so it still needs saying.
+      if (e instanceof Error && e.message === 'device_inactive') return;
+      if (e instanceof Error && e.message === 'deregistered_stuck') {
+        setError('This phone has been removed from your account. Show this to your supervisor.');
+        return;
+      }
+      // A keystore that could not be READ is retryable and says how: the generic
+      // "pull down to try again" below is true but omits the one thing that
+      // usually clears it.
+      if (e instanceof Error && e.message === 'enrolment_unreadable') {
+        setError(friendlyError(e));
+        return;
+      }
+      setError('Could not load your documents. Pull down to try again.');
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
@@ -111,8 +123,7 @@ export default function DocumentsScreen() {
     sendingRef.current = true;
     setSending(true);
     try {
-      const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-      if (!secret) throw new Error('device_inactive');
+      const secret = await requireInstallSecret();
       const sent = await apiPostFile<{ request_id?: string }>(
         '/api/mobile/profile/document',
         { install_secret: secret, doc_type: preview.doc.doc_type },
@@ -326,43 +337,67 @@ function DocumentRow({ doc, canUpload, onUpload }: { doc: ProfileDocument; canUp
         </Text>
       )}
 
-      {doc.current_url && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`View your ${doc.label}`}
-          disabled={opening}
-          onPress={() => void view()}
-          style={({ pressed }) => [styles.viewBtn, pressed && styles.secondaryPressed, opening && styles.disabled]}
-        >
-          {opening
-            ? <ActivityIndicator color={C.brand} />
-            : <>
-                <Icon name="document" size={17} color={C.brand} strokeWidth={2} />
-                <Text style={styles.viewText}>View document</Text>
-              </>}
-        </Pressable>
+      {/* View and Upload side by side. Either can be absent -- nothing to view
+          until something is on file, and no upload while one is being checked --
+          and a lone button simply fills the row, which is why both are flex: 1
+          rather than a fixed half. btnPair also levels the two: on their own they
+          had different heights, radii and border weights, which reads as sloppy
+          once they sit shoulder to shoulder. */}
+      {(doc.current_url || doc.pending || canUpload) && (
+        <View style={styles.btnRow}>
+          {doc.current_url && (
+            <Pressable
+              accessibilityRole="button"
+              /* The visible word is just "View", so the LABEL carries the
+                 document name: a screen reader running down this page would
+                 otherwise hear "View" five times with nothing to tell them
+                 apart. */
+              accessibilityLabel={`View your ${doc.label}`}
+              disabled={opening}
+              onPress={() => void view()}
+              style={({ pressed }) => [styles.viewBtn, styles.btnPair, pressed && styles.secondaryPressed, opening && styles.disabled]}
+            >
+              {opening
+                ? <ActivityIndicator color={C.brand} />
+                : <>
+                    <Icon name="document" size={17} color={C.brand} strokeWidth={2} />
+                    <Text style={styles.viewText}>View</Text>
+                  </>}
+            </Pressable>
+          )}
+
+          {doc.pending ? (
+            /* Takes Upload's place rather than leaving a gap, so a document being
+               checked keeps the same two-button shape as every other row. A plain
+               View, not a disabled Pressable: there is nothing to press at all.
+               accessibilityState still says "disabled" so a screen reader
+               announces an unavailable control instead of stray text. */
+            <View
+              accessibilityRole="button"
+              accessibilityState={{ disabled: true }}
+              accessibilityLabel={`Your ${doc.label} is being checked by your supervisor`}
+              style={[styles.secondary, styles.btnPair, styles.inReview]}
+            >
+              <Icon name="hourglass" size={17} color={C.amber} strokeWidth={2} />
+              <Text style={styles.inReviewText}>In review</Text>
+            </View>
+          ) : canUpload ? (
+            <Pressable
+              accessibilityRole="button"
+              /* Still says whether this REPLACES or ADDS, which "Upload" alone
+                 does not, and which changes what tapping it does to a document
+                 already on file. */
+              accessibilityLabel={doc.has_current ? `Replace your ${doc.label}` : `Add your ${doc.label}`}
+              onPress={onUpload}
+              style={({ pressed }) => [styles.secondary, styles.btnPair, pressed && styles.secondaryPressed]}
+            >
+              <Icon name="upload" size={17} color={C.brand} strokeWidth={2} />
+              <Text style={styles.secondaryText}>Upload</Text>
+            </Pressable>
+          ) : null}
+        </View>
       )}
 
-      {doc.pending ? (
-        <View style={styles.pendingBanner}>
-          <Icon name="hourglass" size={17} color={C.amber} strokeWidth={2} />
-          <Text style={styles.pendingText}>
-            {/* Says explicitly that they cannot send another, because an absent
-                button with no explanation reads as the app being broken. */}
-            {describeWait(doc.pending.submitted_at)} You can send another one after your supervisor has looked at this.
-          </Text>
-        </View>
-      ) : canUpload ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={doc.has_current ? `Replace your ${doc.label}` : `Add your ${doc.label}`}
-          onPress={onUpload}
-          style={({ pressed }) => [styles.secondary, pressed && styles.secondaryPressed]}
-        >
-          <Icon name="upload" size={17} color={C.brand} strokeWidth={2} />
-          <Text style={styles.secondaryText}>{doc.has_current ? 'Send a new one' : 'Add this document'}</Text>
-        </Pressable>
-      ) : null}
     </View>
   );
 }
@@ -420,8 +455,16 @@ const styles = StyleSheet.create({
   },
   viewText: { color: C.brand, fontSize: 15, fontWeight: '700' },
 
-  pendingBanner: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', backgroundColor: C.amberBg, borderRadius: 12, padding: 12 },
-  pendingText: { flex: 1, color: C.ink, fontSize: 14, lineHeight: 20 },
+  // The pair. flex: 1 so one button alone still fills the row, and the shared
+  // height/radius/border so View and Upload read as one control strip rather
+  // than two buttons that happen to be adjacent.
+  btnRow: { flexDirection: 'row', gap: 10 },
+  btnPair: { flex: 1, minHeight: 48, borderRadius: 13, borderWidth: 1.5 },
+  // Amber, matching the hourglass and the waiting banner, so "being checked" reads
+  // as one state across the row rather than three unrelated signals.
+  inReview: { borderColor: C.amber, backgroundColor: C.amberBg },
+  inReviewText: { color: C.amber, fontSize: 15, fontWeight: '700' },
+
 
   secondary: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,

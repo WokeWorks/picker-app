@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 import { File } from 'expo-file-system';
 
@@ -94,7 +95,7 @@ export async function apiPostFile<T>(
     UPLOAD_TIMEOUT_MS,
     'That took too long to send. Check your connection and try again.',
   );
-  if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
+  await refuseOrThrow(response, result, typeof fields.install_secret === 'string' ? fields.install_secret : null);
   return result as T;
 }
 
@@ -121,8 +122,22 @@ export async function apiPost<T>(
     // do is worse than saying nothing.
     'The connection timed out. Check your connection and try again.',
   );
-  if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
+  await refuseOrThrow(response, result, secretFromBody(body));
   return result as T;
+}
+
+/**
+ * The install_secret a request carried, if any.
+ *
+ * Read off the body rather than threaded through every caller: every
+ * authenticated route takes it under this one name, and a route that does not
+ * simply yields null, which refuseOrThrow treats as "cannot tell" and handles
+ * conservatively.
+ */
+function secretFromBody(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const value = (body as Record<string, unknown>).install_secret;
+  return typeof value === 'string' ? value : null;
 }
 
 /**
@@ -139,6 +154,156 @@ export async function apiPost<T>(
  *      would then wait forever with the timer already cancelled. The timer is
  *      cleared only after the body has been read.
  */
+/**
+ * Turn a failed response into a throw -- and, if the server says this phone is no
+ * longer a registered device, DROP ITS CREDENTIAL on the way past.
+ *
+ * Shared by apiPost and apiPostFile deliberately. The first version of this lived
+ * inline, and because both functions end in the same `if (!response.ok) throw`
+ * line it was pasted into apiPostFile -- the file-upload path -- while every
+ * screen goes through apiPost. The result was an infinite loop rather than a
+ * silent miss: screens saw device_inactive and sent the picker to '/', index.tsx
+ * still read a valid enrolment from SecureStore and sent them back to /clock, and
+ * round it went, 94 requests deep before anyone stopped it. One function, one
+ * call site each, so the two cannot drift apart again.
+ *
+ * WHY CLEARING IS SAFE HERE: the server distinguishes a revoked device
+ * (device_inactive, 401) from a lookup it could not perform (service_unavailable,
+ * 503) -- see src/lib/mobile-device-auth.ts. While both answered device_inactive,
+ * a momentary database error would have un-enrolled a healthy phone, recoverable
+ * only by a supervisor issuing a new setup code.
+ *
+ * Deleting is best effort. A keystore that refuses leaves the phone as it was,
+ * which is no worse than not trying.
+ */
+async function refuseOrThrow(
+  response: Response,
+  result: { error?: string },
+  /**
+   * The install secret THIS request was sent with.
+   *
+   * Without it, a late answer destroys a credential it knows nothing about.
+   * Sequence: a request goes out on secret A, the phone is revoked, the picker
+   * enrols again and SecureStore now holds secret B -- and only then does the old
+   * 401 arrive. Clearing "whatever is stored" would delete B, the working
+   * credential they just obtained, and send them back to setup from a phone that
+   * was fine. The failure belongs to A and must only be allowed to affect A.
+   */
+  sentSecret: string | null,
+): Promise<void> {
+  if (response.ok) return;
+  if (result.error === 'device_inactive') {
+    const current = await readEnrolment();
+    if (!current.ok) {
+      // The keystore would not say what is stored, so there is no way to know
+      // whether this failure is still relevant. Destroying nothing is the only
+      // safe answer -- see requireInstallSecret for the same reasoning.
+      throw new Error('enrolment_unreadable');
+    }
+    if (sentSecret && current.secret && current.secret !== sentSecret) {
+      // A newer enrolment replaced the credential this request used. The answer is
+      // about a phone registration that no longer exists, so it is dropped: no
+      // clearing, no navigation. Thrown as device_inactive so the screens stay
+      // quiet about it, exactly as they do for the live case.
+      throw new Error('device_inactive');
+    }
+    const cleared = await clearEnrolment();
+    if (!cleared) {
+      // NAVIGATING HERE WOULD LOOP. index.tsx decides "enrolled" from these two
+      // keys, so sending a phone that still holds them to '/' bounces straight
+      // back to /clock, which asks again, gets device_inactive again, and round
+      // it goes. The picker is told instead -- a stuck keystore is rare, and a
+      // sentence they can show a supervisor beats a screen that flickers.
+      throw new Error('deregistered_stuck');
+    }
+    // CENTRAL, so no caller can forget. The load paths route themselves anyway,
+    // but the ACTION paths -- punch, break, sending a document or a photo -- used
+    // to show an alert and leave a revoked picker sitting in the clock or upload
+    // UI with no way out. Doing it here covers every call that exists now and
+    // every one added later.
+    router.replace('/');
+  }
+  throw new Error(result.error || `Request failed (${response.status})`);
+}
+
+/**
+ * The install secret, or a trip to setup.
+ *
+ * Every authenticated screen begins by reading this key, and each used to
+ * `throw new Error('device_inactive')` when it was missing. That string is the
+ * one the server sends for a REVOKED device, so the screens' handling of it
+ * assumed apiPost had already cleared the credential and navigated -- which for a
+ * locally-missing secret never happened. No request had run. The result was a
+ * blank screen: spinner gone, no schedule, no error, no way to setup.
+ *
+ * Navigating here makes the assumption true for both paths. A phone with no
+ * secret is not enrolled whatever index.tsx last decided, and setup is the only
+ * screen that can help it.
+ */
+export async function requireInstallSecret(): Promise<string> {
+  // THROUGH readEnrolment, not a bare getItemAsync with a catch. The first
+  // version used `.catch(() => null)`, which treats a keystore that FAILED TO
+  // ANSWER the same as one that answered "nothing here" -- so a transient read
+  // error sent a perfectly healthy, enrolled phone to setup, and the picker could
+  // not use the app until the keystore happened to recover.
+  //
+  // This codebase has drawn that line before and written it down: "A read that
+  // THREW is 'I don't know', not 'not registered'". readEnrolment is where that
+  // distinction lives, and it also normalises an empty string to null, which
+  // matters because clearKey blanks a key when deleting fails.
+  const enrolment = await readEnrolment();
+  if (!enrolment.ok) {
+    // Retryable, and deliberately NOT a navigation: nothing is known about this
+    // phone, so nothing should be concluded about it.
+    throw new Error('enrolment_unreadable');
+  }
+  if (enrolment.secret) return enrolment.secret;
+  router.replace('/');
+  throw new Error('device_inactive');
+}
+
+/**
+ * Remove this phone's enrolment, and SAY WHETHER IT WORKED.
+ *
+ * Two deletes, each retried once, then a blanking write as a fallback -- an empty
+ * string reads as not-enrolled everywhere (see isEnrolled), so a keystore that
+ * refuses deletes can still be talked out of claiming this phone is registered.
+ * The boolean is what callers need: whether it is safe to send the picker to
+ * setup, or whether doing so would loop.
+ *
+ * Both keys matter and they do different jobs. INSTALL_SECRET_KEY authenticates
+ * every call; DEVICE_ID_KEY is what index.tsx and LockGate read to decide this
+ * phone is enrolled -- leaving that behind sends the picker to a clock screen
+ * whose every request then fails.
+ */
+export async function clearEnrolment(): Promise<boolean> {
+  const results = await Promise.all([clearKey(INSTALL_SECRET_KEY), clearKey(DEVICE_ID_KEY)]);
+  return results.every(Boolean);
+}
+
+/**
+ * Delete one key, retried once, then blanked.
+ *
+ * One retry, not a loop: a delete that fails twice is not transient, and the
+ * picker should be told rather than held at a spinner.
+ */
+export async function clearKey(key: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await SecureStore.deleteItemAsync(key);
+      return true;
+    } catch {
+      // Fall through to the retry, then to the blanking fallback below.
+    }
+  }
+  try {
+    await SecureStore.setItemAsync(key, '');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function withTimeout(
   url: string,
   init: RequestInit,

@@ -19,6 +19,9 @@ const MESSAGES: Record<string, string> = {
   duplicate_punch: 'That punch was already sent. Pull down to refresh your status.',
   invalid_challenge: 'Something went wrong. Try again.',
   device_inactive: 'This phone is no longer registered. Ask your admin for a new setup code.',
+  service_unavailable: 'The office system is not responding. Try again in a moment.',
+  deregistered_stuck: 'This phone has been removed from your account, but it could not clear its own setup. Show this to your supervisor.',
+  enrolment_unreadable: 'This phone could not read its own setup. Lock and unlock the screen, then try again.',
   employee_inactive: 'Your account is not active. Ask your supervisor.',
   // Setup
   invalid_code: 'That setup code is not valid. Check the 8 digits and try again.',
@@ -39,4 +42,32 @@ export function friendlyError(error: unknown): string {
   const raw = error instanceof Error ? error.message : '';
   if (!raw) return 'Something went wrong. Try again.';
   return MESSAGES[raw] ?? raw;
+}
+
+/**
+ * True when the server has told us this phone is no longer a registered device.
+ *
+ * Distinct from any other failure, because it is the one the picker CANNOT fix by
+ * retrying: a supervisor revoked the phone, or the picker signed out elsewhere.
+ * apiPost has already dropped the stored credential by the time this is true, so
+ * the caller's job is simply to send them to setup rather than leave them on a
+ * screen that will never load.
+ *
+ * Note what this deliberately does NOT match: 'service_unavailable', which the
+ * server returns when it could not READ the device rather than when the device is
+ * gone. That one is retryable and must never take anybody to setup.
+ */
+export function isDeregistered(error: unknown): boolean {
+  return error instanceof Error && error.message === 'device_inactive';
+}
+
+/**
+ * The deregistered case that could NOT clean itself up.
+ *
+ * Kept separate from isDeregistered because the handling is opposite: that one is
+ * already on its way to setup and needs no error, while this one must stay put and
+ * say something, since navigating would loop through index.tsx and back.
+ */
+export function isDeregisteredStuck(error: unknown): boolean {
+  return error instanceof Error && error.message === 'deregistered_stuck';
 }

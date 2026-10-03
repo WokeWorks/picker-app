@@ -14,9 +14,9 @@ import { demoSession, type DemoState } from '@/demo';
 import { CameraSheet } from '@/components/CameraSheet';
 import { requestIntegrityToken } from '@/integrity';
 import { registerForReminders } from '@/notifications';
-import { friendlyError } from '@/messages';
+import { friendlyError, isDeregistered, isDeregisteredStuck } from '@/messages';
 import { C } from '@/theme';
-import { apiPost, apiPostFile, INSTALL_SECRET_KEY } from '@/native-api';
+import { apiPost, apiPostFile, INSTALL_SECRET_KEY, requireInstallSecret } from '@/native-api';
 
 type Store = { name: string; chain?: string | null; area?: string | null; lat: number | null; lng: number | null };
 
@@ -52,14 +52,28 @@ export default function ClockScreen() {
 
   const refresh = useCallback(async () => {
     if (demo) { setSession(demoSession(demoState)); return; }
-    const installSecret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-    if (!installSecret) throw new Error('device_inactive');
+    const installSecret = await requireInstallSecret();
     setSession(await apiPost<Session>('/api/mobile/session', { install_secret: installSecret }));
   }, [demo, demoState]);
 
   const reload = useCallback(() => {
     setLoading(true);
-    refresh().catch((error) => Alert.alert('Could not load your shift', friendlyError(error))).finally(() => setLoading(false));
+    refresh()
+      .catch((error) => {
+        // apiPost has already cleared the credential AND navigated to setup, so
+        // there is nothing to do but stay quiet. Alerting would put a box over the
+        // setup screen about a shift that is no longer this phone's business.
+        if (isDeregistered(error)) return;
+        // The one case that did NOT navigate, because it could not: the keystore
+        // refused to give up the credential, so '/' would bounce straight back
+        // here. Say so instead of looping.
+        if (isDeregisteredStuck(error)) {
+          Alert.alert('This phone has been removed', friendlyError(error));
+          return;
+        }
+        Alert.alert('Could not load your shift', friendlyError(error));
+      })
+      .finally(() => setLoading(false));
   }, [refresh]);
 
   useEffect(reload, [reload]);
@@ -137,8 +151,7 @@ export default function ClockScreen() {
     }
     setBusy(true);
     try {
-      const installSecret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-      if (!installSecret) throw new Error('device_inactive');
+      const installSecret = await requireInstallSecret();
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== 'granted') throw new Error('Allow location access in your phone settings, then try again.');
       const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
@@ -178,8 +191,7 @@ export default function ClockScreen() {
     if (demo) { setDemoState(action === 'start' ? 'break' : 'on'); return; }
     setBusy(true);
     try {
-      const installSecret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
-      if (!installSecret) throw new Error('device_inactive');
+      const installSecret = await requireInstallSecret();
       await apiPost('/api/mobile/break', { install_secret: installSecret, action }, { timeoutMs: 45_000 });
       await refresh();
     } catch (error) {

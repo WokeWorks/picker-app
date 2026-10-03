@@ -120,9 +120,15 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {/* These three must agree with the paragraph above, and the middle one did
+            not. It read "Your fingerprint approves each punch", which is the OLD
+            design -- the one this file's own header says is gone: the biometric
+            opens the app, and the SELFIE is what proves who is punching. Two lines
+            apart, the screen told a new picker both things. */}
         <View style={styles.rules}>
           <Rule icon="phone" text="One picker, one phone" />
-          <Rule icon={bio ?? 'fingerprint'} text={`Your ${bio === 'face' ? 'face' : 'fingerprint'} approves each punch`} />
+          <Rule icon="camera" text="A photo of your face proves it's you" />
+          <Rule icon={bio ?? 'fingerprint'} text={`Your ${bio === 'face' ? 'face' : 'fingerprint'} opens the app`} />
           <Rule icon="pin" text="Your location is checked at every punch" />
         </View>
 

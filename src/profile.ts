@@ -46,23 +46,6 @@ export type Profile = {
   documents: ProfileDocument[];
 };
 
-/**
- * "Sent 2 hours ago and waiting to be checked."
- *
- * Phrased around the WAIT rather than the timestamp, because the only question a
- * picker has on this screen is whether anything is expected of them. An exact
- * time would invite them to work that out themselves.
- */
-export function describeWait(submittedAt: string): string {
-  const mins = Math.max(0, Math.round((Date.now() - Date.parse(submittedAt)) / 60000));
-  if (!Number.isFinite(mins)) return 'Waiting to be checked.';
-  if (mins < 2) return 'Just sent, waiting to be checked.';
-  if (mins < 60) return `Sent ${mins} minutes ago, waiting to be checked.`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `Sent ${hours} hour${hours === 1 ? '' : 's'} ago, waiting to be checked.`;
-  const days = Math.round(hours / 24);
-  return `Sent ${days} day${days === 1 ? '' : 's'} ago, waiting to be checked.`;
-}
 
 /** How many days until a date, negative once it has passed. Null if absent. */
 export function daysUntil(date: string | null): number | null {

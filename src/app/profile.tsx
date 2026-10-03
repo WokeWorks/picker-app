@@ -9,7 +9,7 @@ import { Icon } from '@/components/Icon';
 import { SourceSheet } from '@/components/SourceSheet';
 import { MAX_UPLOAD_SIDE, isStoragePickerAvailable, pickFromStorage } from '@/image';
 import { DEVICE_ID_KEY, INSTALL_SECRET_KEY, apiPost, apiPostFile, formatPhone } from '@/native-api';
-import { type Profile, describeWait } from '@/profile';
+import { type Profile } from '@/profile';
 import { C } from '@/theme';
 
 /**
@@ -255,7 +255,6 @@ export default function ProfileScreen() {
                 {photo?.url && (
                   <>
                     <View>
-                      <Text style={styles.photoLabel}>In use now</Text>
                       <Image source={{ uri: photo.url }} style={styles.photo} accessibilityLabel="Your photo in use now" />
                     </View>
                     {waiting && <Icon name="arrowRight" size={20} color={C.muted} strokeWidth={2} />}
@@ -286,33 +285,29 @@ export default function ProfileScreen() {
               </View>
 
               {waiting ? (
-                <View style={styles.pendingBanner}>
-                  <Icon name="hourglass" size={17} color={C.amber} strokeWidth={2} />
-                  <Text style={styles.pendingText}>
-                    {/* Only true when there IS one in use. On a first upload the
-                        reassurance is the opposite: nothing has been replaced
-                        because there was nothing there. */}
-                    {describeWait(waiting.submitted_at)}{photo?.url
-                      ? ' Your photo in use has not changed.'
-                      : ' It will be used once your supervisor approves it.'}
-                  </Text>
+                /* Same inert control as a document in review (documents.tsx), in
+                   the place the action button occupies, so both screens say
+                   "waiting on your supervisor" the same way. A plain View: there
+                   is nothing to press. */
+                <View
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: true }}
+                  accessibilityLabel="Your new photo is being checked by your supervisor"
+                  style={[styles.secondary, styles.inReview]}
+                >
+                  <Icon name="hourglass" size={18} color={C.amber} strokeWidth={2} />
+                  <Text style={styles.inReviewText}>In review</Text>
                 </View>
               ) : (
-                <Text style={styles.help}>
-                  This is the photo every clock-in is checked against.
-                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setChooserOpen(true)}
+                  style={({ pressed }) => [styles.secondary, pressed && styles.secondaryPressed]}
+                >
+                  <Icon name="upload" size={18} color={C.brand} strokeWidth={2} />
+                  <Text style={styles.secondaryText}>Change your photo</Text>
+                </Pressable>
               )}
-
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setChooserOpen(true)}
-                style={({ pressed }) => [styles.secondary, pressed && styles.secondaryPressed]}
-              >
-                <Icon name="upload" size={18} color={C.brand} strokeWidth={2} />
-                {/* Different words when something is already waiting, because
-                    "Change photo" there would suggest the first one is stuck. */}
-                <Text style={styles.secondaryText}>{waiting ? 'Take a different photo' : 'Change your photo'}</Text>
-              </Pressable>
             </View>
 
             {/* ── Read-only details ─────────────────────────────────────── */}
@@ -321,11 +316,6 @@ export default function ProfileScreen() {
               <Field label="Name" value={profile.name || '—'} />
               <View style={styles.divider} />
               <Field label="Phone" value={profile.phone ? formatPhone(profile.phone) : '—'} />
-              <Text style={styles.help}>
-                {/* Says who to ask, instead of leaving them wondering why they
-                    cannot edit their own name. */}
-                Ask your supervisor if either of these is wrong.
-              </Text>
             </View>
 
             {/* ── Documents ─────────────────────────────────────────────── */}
@@ -476,9 +466,9 @@ function Field({ label, value }: { label: string; value: string }) {
 function documentSummary(profile: Profile): string {
   const waiting = profile.documents.filter((d) => d.pending).length;
   const missing = profile.documents.filter((d) => d.required && !d.has_current && !d.pending).length;
-  if (waiting && missing) return `${waiting} being checked · ${missing} still needed`;
-  if (waiting) return `${waiting} being checked`;
-  if (missing) return `${missing} still needed`;
+  if (waiting && missing) return `${waiting} review pending · ${missing} upload pending`;
+  if (waiting) return `${waiting} review pending`;
+  if (missing) return `${missing} upload pending`;
   return 'All up to date';
 }
 
@@ -512,9 +502,8 @@ const styles = StyleSheet.create({
   photoEmpty: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line },
   photoWaiting: { borderWidth: 2, borderColor: C.amber },
 
-  pendingBanner: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', backgroundColor: C.amberBg, borderRadius: 12, padding: 12 },
-  pendingText: { flex: 1, color: C.ink, fontSize: 14, lineHeight: 20 },
-  help: { color: C.muted, fontSize: 13, lineHeight: 19 },
+  inReview: { borderColor: C.amber, backgroundColor: C.amberBg },
+  inReviewText: { color: C.amber, fontSize: 15, fontWeight: '700' },
 
   field: { gap: 3 },
   fieldLabel: { color: C.muted, fontSize: 13 },

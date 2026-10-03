@@ -9,18 +9,24 @@ import { useBiometricKind } from '@/biometric';
 import { Brand } from '@/components/Brand';
 import { Icon, type IconName } from '@/components/Icon';
 import { C } from '@/theme';
-import { DEVICE_ID_KEY } from '@/native-api';
+import { DEVICE_ID_KEY, isEnrolled, readEnrolment } from '@/native-api';
 import { takeLaunchScreen } from '@/notifications';
 
 // 'unlocked' = the phone has no screen lock at all. That is the ONLY thing that
 // stops a phone being set up.
+//
+// 'unreadable' = secure storage could not be read. A separate state because
+// routing it to 'unlocked' told the picker their phone had no screen lock and
+// asked them to set a PIN -- advice that cannot fix it, for a problem they do not
+// have. A keystore is briefly unreadable around boot; the honest answer is to say
+// so and let them try again.
 //
 // It used to also refuse any phone without a STRONG biometric, which made sense
 // when the fingerprint was the identity proof on every punch. It is not any more:
 // the server compares a selfie to the picker's reference photo, and that is what
 // proves who is punching. Refusing a perfectly secure phone because its sensor is
 // weak or absent turned away pickers for a check the system no longer relies on.
-type DeviceCheck = 'checking' | 'ready' | 'unlocked';
+type DeviceCheck = 'checking' | 'ready' | 'unlocked' | 'unreadable';
 
 export default function HomeScreen() {
   const [deviceCheck, setDeviceCheck] = useState<DeviceCheck>('checking');
@@ -30,8 +36,30 @@ export default function HomeScreen() {
     let mounted = true;
 
     async function checkDevice() {
-      const enrolledDevice = await SecureStore.getItemAsync(DEVICE_ID_KEY);
-      if (enrolledDevice) {
+      // BOTH keys, not just the device id. They can come apart -- a sign-out whose
+      // second delete failed, a partial restore, a keystore that lost one entry --
+      // and the device id alone used to mean "enrolled". That sent the picker to a
+      // clock screen with no credential, where every call fails with
+      // device_inactive and nothing clears the stale key, so reopening the app
+      // reproduced it forever.
+      //
+      // readEnrolment does NOT swallow a read failure, and that distinction is
+      // load-bearing: catching the read here and treating a thrown error as "no
+      // secret" would delete the device id off a perfectly healthy phone on a
+      // transient keystore error, and the picker would need a new setup code from
+      // a supervisor to recover. A throw falls to the outer catch below, which is
+      // not destructive.
+      const enrolment = await readEnrolment();
+      if (!enrolment.ok) throw new Error('enrolment_unreadable');
+      if (!mounted) return;
+
+      if (enrolment.deviceId && !enrolment.secret) {
+        // Half-enrolled is not enrolled, and only a read that SUCCEEDED and came
+        // back empty gets here. Drop the marker and fall through to setup, which
+        // is the only thing that can fix this phone.
+        await SecureStore.deleteItemAsync(DEVICE_ID_KEY).catch(() => {});
+      }
+      if (isEnrolled(enrolment)) {
         // The cold-start deep link is resolved HERE, in sequence, rather than in
         // the root layout. Both used to navigate: the layout pushed the screen
         // the push was about, this replaced it with /clock a moment later, and
@@ -54,14 +82,18 @@ export default function HomeScreen() {
       setDeviceCheck(level === LocalAuthentication.SecurityLevel.NONE ? 'unlocked' : 'ready');
     }
 
-    checkDevice().catch(() => mounted && setDeviceCheck('unlocked'));
+    checkDevice().catch((err: unknown) => {
+      if (!mounted) return;
+      // Distinguished, because the two need different words and different advice.
+      setDeviceCheck((err as Error)?.message === 'enrolment_unreadable' ? 'unreadable' : 'unlocked');
+    });
     return () => {
       mounted = false;
     };
   }, []);
 
   const isReady = deviceCheck === 'ready';
-  const hasProblem = deviceCheck === 'unlocked';
+  const hasProblem = deviceCheck === 'unlocked' || deviceCheck === 'unreadable';
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -129,12 +161,18 @@ function Rule({ icon, text }: { icon: IconName; text: string }) {
 function statusTitle(status: DeviceCheck) {
   if (status === 'checking') return 'Checking this phone…';
   if (status === 'ready') return 'This phone is ready';
+  if (status === 'unreadable') return 'This phone could not be checked';
   return 'This phone has no screen lock';
 }
 
 function statusDetail(status: DeviceCheck) {
   if (status === 'checking') return 'This only takes a moment.';
   if (status === 'ready') return 'Your phone lock will be used to open the app.';
+  if (status === 'unreadable') {
+    // Says what to do, and does not pretend to know why. Nothing the picker can
+    // change in settings fixes this one.
+    return 'The app could not read its secure storage. Close the app completely and open it again. Tell your supervisor if it keeps happening.';
+  }
   return 'Set a PIN, pattern or password in your phone settings, then come back. A fingerprint or face is optional — it just makes opening the app quicker.';
 }
 

@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, type AppStateStatus, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as SecureStore from 'expo-secure-store';
 
 import { biometricFailureMessage, useBiometricKind } from '@/biometric';
 import { Brand } from '@/components/Brand';
 import { Icon } from '@/components/Icon';
-import { isPrompting, isUnlocked, markLocked, requestUnlock } from '@/lock';
-import { DEVICE_ID_KEY } from '@/native-api';
+import { hasBeenAway, isPrompting, isUnlocked, markLeft, markLocked, markReturned, requestUnlock } from '@/lock';
+import { isEnrolled, readEnrolment } from '@/native-api';
 import { C } from '@/theme';
 
 type Phase =
@@ -63,11 +62,20 @@ export function LockGate({ children }: { children: React.ReactNode }) {
   // registration again each time. See the comment there.
   useEffect(() => {
     let mounted = true;
-    SecureStore.getItemAsync(DEVICE_ID_KEY)
-      .then((deviceId) => {
+    // BOTH keys, matching index.tsx exactly. Gating on either one alone makes the
+    // two disagree: on the device id, the picker unlocks their way to a screen
+    // that only tells them to get a new setup code; on the secret, a phone index
+    // has already sent to setup still gets an unlock wall in front of it.
+    readEnrolment()
+      .then((enrolment) => {
         if (!mounted) return;
-        lastKnownRegistered.current = !!deviceId;
-        if (!deviceId) {
+        const registered = isEnrolled(enrolment);
+        // Only recorded when the read actually WORKED. An unreadable keystore must
+        // not be remembered as "not registered", or the first foreground after it
+        // would fall back to that wrong answer and leave the phone ungated for the
+        // rest of the session.
+        if (enrolment.ok) lastKnownRegistered.current = registered;
+        if (!registered) {
           setPhase('open');
           return;
         }
@@ -84,46 +92,87 @@ export function LockGate({ children }: { children: React.ReactNode }) {
     return () => { mounted = false; };
   }, [unlock]);
 
-  // Re-lock when the app comes back from the background after the grace period.
+  // The cover's own state, readable from the AppState handler without making the
+  // effect depend on it. Used to answer one question: is the lock ALREADY up?
+  //
+  // Written in an effect rather than during render: assigning to a ref while
+  // rendering is what the react-hooks rule objects to, and it is the kind of
+  // thing that stops being true under concurrent rendering.
+  const phaseRef = useRef(phase);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+  // Re-lock when the app comes back from the BACKGROUND after the grace period.
   useEffect(() => {
     let cancelled = false;
 
     async function onChange(next: AppStateStatus) {
-      // Cheap synchronous rejections first, before any await. Critical: the
-      // native biometric sheet itself makes the app go inactive/background.
-      // Without this guard the listener re-locks the app the moment it asks to
-      // be unlocked, and prompts forever.
-      if (isPrompting()) return;
-      if (next !== 'active') return;
-      if (isUnlocked()) return;
-
-      // Read the registration FRESH every time, rather than caching what the
-      // mount effect found. A phone that enrols during this session started out
-      // unregistered, so a cached "not gated" would mean the lock never appears
-      // again until the app is killed -- and that is the one session where it
-      // matters most, because the phone has just become able to punch.
-      let registered: boolean;
-      try {
-        registered = !!(await SecureStore.getItemAsync(DEVICE_ID_KEY));
-        lastKnownRegistered.current = registered;
-      } catch {
-        // A read that THREW is "I don't know", not "not registered". Collapsing
-        // those two into one branch meant a single unreadable keystore left the
-        // app open for the rest of the run: every foreground after it skipped the
-        // lock silently, with nothing to notice and no retry.
-        //
-        // This matters more than the "convenience gate" framing suggests. The
-        // server flags a bad face match but does NOT refuse the punch (founder
-        // decision, see api/mobile/punch/commit/route.ts), so whoever holds an
-        // unlocked phone can complete a real punch that is only reviewed after
-        // the fact. That makes this lock preventive, not cosmetic, so an unknown
-        // answer stays locked.
-        registered = lastKnownRegistered.current;
+      if (next === 'background') {
+        // Starts the grace clock, and deliberately runs even while a prompt is on
+        // screen: a prompt that backgrounds the app and then SUCCEEDS clears this
+        // anyway, while one that is cancelled leaves it set, which is correct --
+        // the app really is away. Skipping it here was how a Home press landing
+        // on a successful unlock left the app unlocked indefinitely.
+        markLeft();
+        return;
       }
-      if (cancelled || !registered) return;
-      // Re-check after the await: the picker may have unlocked, or a prompt may
-      // have started, while SecureStore was being read.
-      if (isPrompting() || isUnlocked()) return;
+      if (next !== 'active') return;
+
+      // The native biometric sheet backgrounds the app itself. Without this the
+      // listener re-locks the instant it asks to unlock, and prompts forever.
+      if (isPrompting()) return;
+
+      // Read through a function so TypeScript cannot narrow the result of the
+      // first call away at the second. Reading the ref directly made the check
+      // below look like dead code, it was removed on that basis, and it is not
+      // dead -- readEnrolment() is awaited and the mount effect can raise the
+      // cover while it is pending.
+      // Anything but 'open': the cover is on screen during 'deciding' too (see
+      // `locked` below), and continuing from there could call unlock() in parallel
+      // with the mount effect's own.
+      const alreadyLocked = () => phaseRef.current !== 'open';
+
+      // ALREADY locked: the cover is up and the picker has a Try again button.
+      // Without this, cancelling a prompt on any Android that pauses the activity
+      // re-locked and re-prompted the moment the activity resumed -- so the
+      // cancel button could never be used. The isPrompting guard above does not
+      // catch it, because by then the prompt has already resolved.
+      if (alreadyLocked()) return;
+
+      // Nothing to judge: the app never actually went away. This replaces
+      // tracking the previous AppState, which was redundant -- leftAt already
+      // records a real absence, and deriving it from the state machine would have
+      // forgiven a genuine one on any platform that inserted 'inactive' on the
+      // way back.
+      if (!hasBeenAway()) return;
+
+      if (isUnlocked()) {
+        // Inside the grace. Stop the clock so this trip is not charged again.
+        markReturned();
+        return;
+      }
+
+      // Read the registration FRESH rather than caching what the mount effect
+      // found. A phone that enrols during this session started out unregistered,
+      // so a cached "not gated" would mean the lock never appears again until the
+      // app is killed -- the one session where it matters most, because the phone
+      // has just become able to punch.
+      // A read that THREW is "I don't know", not "not registered" -- readEnrolment
+      // reports that as ok:false rather than hiding it behind a null. Falling back
+      // to the last known state means a phone we have seen registered stays gated
+      // through a transient keystore error, instead of silently opening.
+      const enrolment = await readEnrolment();
+      const registered = enrolment.ok ? isEnrolled(enrolment) : lastKnownRegistered.current;
+      if (enrolment.ok) lastKnownRegistered.current = registered;
+      if (cancelled || !registered) {
+        markReturned();
+        return;
+      }
+      // Re-checked after the await, PHASE INCLUDED. The picker may have unlocked,
+      // a prompt may have started, or the mount effect may have raised the cover
+      // while the enrolment was being read -- and calling unlock() on a cover that
+      // is already up re-prompts over a cancelled one, which is the loop the Try
+      // again button exists to let them escape.
+      if (alreadyLocked() || isPrompting() || isUnlocked()) return;
 
       markLocked();
       setPhase('locked');

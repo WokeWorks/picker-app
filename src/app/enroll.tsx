@@ -68,7 +68,7 @@ export default function EnrollScreen() {
       const integrityToken = await requestIntegrityToken(requestHash);
       const enrolled = await apiPost<{ device_id: string }>('/api/mobile/enroll', {
         code, phone: phoneDigits(phone), platform: 'android', install_secret: installSecret, device_label: deviceLabel, integrity_token: integrityToken,
-      });
+      }, { timeoutMs: 45_000 });
       await SecureStore.setItemAsync(INSTALL_SECRET_KEY, installSecret, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
       await SecureStore.setItemAsync(DEVICE_ID_KEY, enrolled.device_id, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
       router.replace('/clock');

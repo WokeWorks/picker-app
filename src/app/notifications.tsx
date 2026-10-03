@@ -65,6 +65,19 @@ export default function NotificationsScreen() {
   const [next, setNext] = useState<Anchor>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  /**
+   * A pull-to-refresh in progress, as distinct from the first load.
+   *
+   * Its own state rather than reusing `loading`, because `loading` swaps the whole
+   * FlatList out for a full-screen spinner -- right on a first load, and wrong for
+   * a refresh, where it would tear the list down mid-pull and throw away the
+   * picker's scroll position. profile.tsx and documents.tsx can share one flag
+   * because their first-load spinner sits INSIDE the scroll view; this one does not.
+   *
+   * It is also not the `refreshing` ref below: that is read synchronously by
+   * loadMore to decide whether to start, and a ref cannot drive a re-render.
+   */
+  const [pulling, setPulling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Selection mode is entered by long-pressing a row, so a normal tap still just
   // opens the thing the notification is about.
@@ -116,6 +129,18 @@ export default function NotificationsScreen() {
       }
     }
   }, [load]);
+
+  // Wraps refresh so the control has something to spin on. The flag is cleared in
+  // a finally, so a failed refresh releases the spinner rather than leaving it
+  // turning over a list that is not being updated.
+  const pullToRefresh = useCallback(async () => {
+    setPulling(true);
+    try {
+      await refresh();
+    } finally {
+      setPulling(false);
+    }
+  }, [refresh]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -228,7 +253,10 @@ export default function NotificationsScreen() {
           data={notes}
           keyExtractor={(n) => n.id}
           contentContainerStyle={notes.length ? styles.list : styles.listEmpty}
-          refreshControl={<RefreshControl refreshing={false} onRefresh={() => void refresh()} tintColor={C.brand} colors={[C.brand]} />}
+          // `refreshing` was hardcoded false, so pulling down fetched a new page
+          // and gave no sign it had: it looked like nothing happened, which is how
+          // someone concludes the screen is broken and pulls repeatedly.
+          refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => void pullToRefresh()} tintColor={C.brand} colors={[C.brand]} />}
           onEndReachedThreshold={0.4}
           onEndReached={() => void loadMore()}
           ListEmptyComponent={

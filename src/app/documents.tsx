@@ -4,7 +4,9 @@ import { ActivityIndicator, Alert, Image, Pressable, RefreshControl, ScrollView,
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
-import { MAX_DOCUMENT_SIDE, isStoragePickerAvailable, pickFromStorage } from '@/image';
+import { shouldViewInApp } from '@/components/DocumentViewer';
+import { SourceSheet } from '@/components/SourceSheet';
+import { MAX_DOCUMENT_SIDE, isPhotoLibraryAvailable, isStoragePickerAvailable, pickFromPhotoLibrary, pickFromStorage } from '@/image';
 import { apiPost, apiPostFile, requireInstallSecret } from '@/native-api';
 import { friendlyError } from '@/messages';
 import { openRemoteFile, sweepViewedCache } from '@/open-file';
@@ -42,6 +44,16 @@ export default function DocumentsScreen() {
   // rather than offer one that throws. Defaults to false so a slow check shows the
   // camera-only sheet instead of a row that might fail.
   const [storageOk, setStorageOk] = useState(false);
+  // iOS only. On an iPhone the Files picker cannot see the photo library at all, so
+  // without this a picker who photographed their passport has no way to send it.
+  // False on Android, where the one picker already reaches every gallery app.
+  const [photosOk, setPhotosOk] = useState(false);
+  // The document waiting on a source choice. Only used where photosOk is true; on
+  // Android the picker opens straight away, exactly as before.
+  const [chooserFor, setChooserFor] = useState<ProfileDocument | null>(null);
+  // See profile.tsx: iOS will not present a picker over the sheet's Modal, so the
+  // choice is queued and run once the sheet has really gone.
+  const afterSheetRef = useRef<(() => void) | null>(null);
 
   // Which load is current. Two can overlap -- a pull-to-refresh while send()'s
   // reload is in flight -- and without this the OLDER response can land second
@@ -92,13 +104,14 @@ export default function DocumentsScreen() {
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => { void isStoragePickerAvailable().then(setStorageOk); }, []);
+  useEffect(() => { void isPhotoLibraryAvailable().then(setPhotosOk); }, []);
 
   // Sweeps old viewed copies on the way IN, not only when another document is
   // opened. Viewing one document and never opening another would otherwise keep
   // that copy -- a passport or a visa -- for as long as the app is installed.
   useEffect(() => { void sweepViewedCache(); }, []);
 
-  const choose = useCallback(async (doc: ProfileDocument) => {
+  const chooseFromStorage = useCallback(async (doc: ProfileDocument) => {
     // See profile.tsx: a double-tap otherwise starts two pickers, and the second
     // throws over the top of the first.
     if (pickingRef.current) return;
@@ -106,8 +119,9 @@ export default function DocumentsScreen() {
     try {
       // PDFs allowed: a visa or labour card usually arrives as one, and nothing
       // measures a document -- a person reads it, so the original beats a photo
-      // of a screen. Android's own picker lists every source on the phone,
-      // gallery apps included, so this one route covers both.
+      // of a screen. On Android this one route covers everything, because its
+      // picker lists every source on the phone including gallery apps. On iOS it
+      // is the Files app, and photos are reached through chooseFromPhotos instead.
       const picked = await pickFromStorage({ maxSide: MAX_DOCUMENT_SIDE, allowPdf: true });
       // null means they backed out of the OS picker — not an error, no alert.
       if (picked) setPreview({ doc, uri: picked.uri, mimeType: picked.mimeType, name: picked.name });
@@ -117,6 +131,41 @@ export default function DocumentsScreen() {
       pickingRef.current = false;
     }
   }, []);
+
+  // iOS only. Same guards and the same error handling, so the two sources cannot
+  // drift in how a cancel or a failure is treated.
+  const chooseFromPhotos = useCallback(async (doc: ProfileDocument) => {
+    if (pickingRef.current) return;
+    pickingRef.current = true;
+    try {
+      const picked = await pickFromPhotoLibrary({ maxSide: MAX_DOCUMENT_SIDE });
+      if (picked) setPreview({ doc, uri: picked.uri, mimeType: picked.mimeType, name: picked.name });
+    } catch (e) {
+      Alert.alert('Could not use that file', e instanceof Error ? e.message : 'Try another one.');
+    } finally {
+      pickingRef.current = false;
+    }
+  }, []);
+
+  /**
+   * Where the upload button goes.
+   *
+   * Android keeps its existing behaviour exactly: one tap, picker opens. The sheet
+   * appears only where there are genuinely two different places a file can live.
+   */
+  /**
+   * Opens the viewer ROUTE. Only the document's type travels, never the signed URL:
+   * navigation parameters live in router state and surface in logs and deep links,
+   * and these are passports. The viewer looks the file up for itself.
+   */
+  const openViewer = useCallback((doc: ProfileDocument) => {
+    router.push({ pathname: '/document', params: { type: doc.doc_type } });
+  }, []);
+
+  const choose = useCallback((doc: ProfileDocument) => {
+    if (photosOk) setChooserFor(doc);
+    else void chooseFromStorage(doc);
+  }, [photosOk, chooseFromStorage]);
 
   const send = useCallback(async () => {
     if (!preview || sendingRef.current) return;
@@ -238,12 +287,48 @@ export default function DocumentsScreen() {
                 // route will actually enforce -- so a button shown against it is
                 // a button that fails after the picker has chosen a file.
                 canUpload={storageOk && doc.can_upload}
-                onUpload={() => void choose(doc)}
+                onUpload={() => choose(doc)}
+                onViewInApp={openViewer}
               />
             ))}
           </>
         ) : null}
       </ScrollView>
+
+      {/* iOS only -- see `choose`. Rendered unconditionally because SourceSheet
+          handles its own visibility and exit animation. */}
+      <SourceSheet
+        visible={chooserFor !== null}
+        title="Where is the file?"
+        options={[
+          {
+            icon: 'gallery',
+            label: 'Choose from Photos',
+            onPress: () => {
+              const doc = chooserFor;
+              afterSheetRef.current = () => { if (doc) void chooseFromPhotos(doc); };
+              setChooserFor(null);
+            },
+          },
+          {
+            icon: 'document',
+            // Where a PDF visa or labour card lives on an iPhone.
+            label: 'Choose from Files',
+            available: storageOk,
+            onPress: () => {
+              const doc = chooserFor;
+              afterSheetRef.current = () => { if (doc) void chooseFromStorage(doc); };
+              setChooserFor(null);
+            },
+          },
+        ]}
+        onCancel={() => { afterSheetRef.current = null; setChooserFor(null); }}
+        onClosed={() => {
+          const run = afterSheetRef.current;
+          afterSheetRef.current = null;
+          run?.();
+        }}
+      />
 
       {preview && (
         <View style={styles.previewLayer}>
@@ -293,7 +378,13 @@ export default function DocumentsScreen() {
   );
 }
 
-function DocumentRow({ doc, canUpload, onUpload }: { doc: ProfileDocument; canUpload: boolean; onUpload: () => void }) {
+function DocumentRow({ doc, canUpload, onUpload, onViewInApp }: {
+  doc: ProfileDocument;
+  canUpload: boolean;
+  onUpload: () => void;
+  /** Opens the in-app viewer. The screen owns it, so only one can be open. */
+  onViewInApp: (doc: ProfileDocument) => void;
+}) {
   const expiry = expiryState(doc.expiry_date);
   const expiryText = formatDate(doc.expiry_date);
   const [opening, setOpening] = useState(false);
@@ -304,6 +395,16 @@ function DocumentRow({ doc, canUpload, onUpload }: { doc: ProfileDocument; canUp
   // looks inert for three seconds gets tapped again.
   const view = useCallback(async () => {
     if (opening || !doc.current_url) return;
+
+    // Shown in the app wherever it can be. Nothing is written to disk and no other
+    // app receives a copy -- which matters here, because these are passports.
+    // A PDF on Android is the exception and still goes out to a reader; see
+    // shouldViewInApp for why.
+    if (shouldViewInApp(doc.current_mime)) {
+      onViewInApp(doc);
+      return;
+    }
+
     setOpening(true);
     try {
       await openRemoteFile(doc.current_url, { mimeType: doc.current_mime, fileName: doc.current_name });
@@ -312,7 +413,7 @@ function DocumentRow({ doc, canUpload, onUpload }: { doc: ProfileDocument; canUp
     } finally {
       setOpening(false);
     }
-  }, [opening, doc.current_url, doc.current_mime, doc.current_name]);
+  }, [opening, doc, onViewInApp]);
 
   return (
     <View style={styles.card}>

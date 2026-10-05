@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -37,6 +37,7 @@ export function SourceSheet({
   title,
   options,
   onCancel,
+  onClosed,
 }: {
   visible: boolean;
   title: string;
@@ -49,8 +50,24 @@ export function SourceSheet({
    */
   options: SourceOption[];
   onCancel: () => void;
+  /**
+   * Fired once the sheet is REALLY gone from the screen, not merely asked to go.
+   *
+   * This exists for iOS. A file picker is a native screen, and iOS refuses to put
+   * one on top of a view controller that is already presenting something -- and
+   * this sheet is a Modal, which is exactly that. Starting a picker from an
+   * option's onPress therefore fails on iOS while working on Android, which has no
+   * such restriction. So the screens queue the picker and start it from here.
+   */
+  onClosed?: () => void;
 }) {
   const [anim] = useState(() => new Animated.Value(0));
+  // Kept in a ref so the animation callback below always calls the latest one
+  // without the effect having to depend on it and restart the animation.
+  // Assigned in an effect, not during render: react-hooks/purity forbids touching
+  // a ref while rendering, and the animation callback only ever runs afterwards.
+  const onClosedRef = useRef(onClosed);
+  useEffect(() => { onClosedRef.current = onClosed; }, [onClosed]);
   // Lags `visible` on the way out so the closing animation can finish before the
   // Modal is torn down. Without it the sheet vanishes instantly and the animation
   // is only ever seen opening.
@@ -80,7 +97,14 @@ export function SourceSheet({
       useNativeDriver: true,
       // `finished` is false when a reopen interrupted this; unmounting then would
       // tear down the sheet that is currently sliding back in.
-    }).start(({ finished }) => { if (finished) setMounted(false); });
+    }).start(({ finished }) => {
+      if (!finished) return;
+      setMounted(false);
+      // One frame after unmount. Removing the Modal from the tree is not the same
+      // as UIKit having finished dismissing it, and presenting a picker in the gap
+      // is the very failure this callback exists to avoid.
+      requestAnimationFrame(() => onClosedRef.current?.());
+    });
   }, [visible, anim]);
 
   // Filtered once, so the divider logic below counts only rows that will render.

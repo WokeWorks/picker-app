@@ -34,7 +34,17 @@ export default function RootLayout() {
       {/* A registered phone asks for a fingerprint or face before showing
           anything. Convenience, not a punch-path control -- see src/lock.ts. */}
       <LockGate>
-        <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: C.canvas } }} />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            animation: 'slide_from_right',
+            contentStyle: { backgroundColor: C.canvas },
+            // iOS enables the edge swipe by default; Android does not. Turned on so
+            // going back feels the same on both, which is the point of these being
+            // routes rather than modals.
+            gestureEnabled: true,
+          }}
+        />
       </LockGate>
     </SafeAreaProvider>
   );

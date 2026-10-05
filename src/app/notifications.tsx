@@ -10,6 +10,7 @@ import { friendlyError, isDeregistered } from '@/messages';
 import { apiPost, INSTALL_SECRET_KEY, requireInstallSecret } from '@/native-api';
 import { takeNavDirection } from '@/nav-direction';
 import { C } from '@/theme';
+import { setUnreadCount as publishUnreadCount } from '@/unread';
 
 type Note = {
   id: string;
@@ -82,6 +83,12 @@ export default function NotificationsScreen() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const navPad = useBottomNavPadding();
+
+  // Push the count this screen already tracks into the shared store, so the bar's
+  // badge follows a message being read immediately. Syncing an external system is
+  // what an effect is for, and this screen is the only place the number can move
+  // without a navigation.
+  useEffect(() => { publishUnreadCount(unreadCount); }, [unreadCount]);
   // Taken ONCE as this screen mounts, not on every render: re-reading mid
   // transition would change the animation under it. See src/nav-direction.ts.
   const [navAnimation] = useState(takeNavDirection);

@@ -7,6 +7,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import { Icon, type IconName } from '@/components/Icon';
 import { apiPost, INSTALL_SECRET_KEY } from '@/native-api';
+import { setUnreadCount, useUnreadCount } from '@/unread';
 import { setNavDirection } from '@/nav-direction';
 import { C } from '@/theme';
 
@@ -52,7 +53,9 @@ export function useBottomNavPadding(): number {
 
 export function BottomNav() {
   const insets = useSafeAreaInsets();
-  const [unread, setUnread] = useState(0);
+  // Read from the shared store, so a message read on the notifications screen
+  // clears the badge immediately rather than at the next tab change.
+  const unread = useUnreadCount();
   const pathname = usePathname();
   // Carried through to the schedule screen, which is the only other screen that
   // reads it. The Schedule button this bar replaced passed it too, and without
@@ -81,10 +84,11 @@ export function BottomNav() {
     }).start();
   }, [active, slide]);
 
-  // Re-read on every tab change, which is the only moment the count can have
-  // moved without this component knowing: reading notifications happens on the
-  // notifications screen, and leaving it is a tab change. Failures are swallowed
-  // -- a stale badge is not worth an error in front of a picker.
+  // Re-read on every tab change. The notifications screen pushes the count into
+  // the same store as it reads messages, so this is the backstop rather than the
+  // only source: it catches a count that moved while the app was elsewhere.
+  // Failures are swallowed -- a stale badge is not worth an error in front of a
+  // picker.
   useEffect(() => {
     if (!onTab) return;
     let alive = true;
@@ -96,7 +100,7 @@ export function BottomNav() {
           install_secret: secret,
           before: null,
         });
-        if (alive) setUnread(res.unread ?? 0);
+        if (alive) setUnreadCount(res.unread ?? 0);
       } catch {
         // Leave the previous count rather than zeroing a badge that may be right.
       }

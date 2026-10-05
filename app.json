@@ -12,6 +12,9 @@
       "bundleIdentifier": "ae.opspro.picker",
       "config": {
         "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "OpsPro Picker connects to a development server on this network while testing. The App Store version does not use the local network."
       }
     },
     "android": {
@@ -56,7 +59,22 @@
         {
           "color": "#1B5746"
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "OpsPro Picker needs your photos so you can choose a reference photo or a document from your library."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "enableSceneSupport": true
+          }
+        }
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true

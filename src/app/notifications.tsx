@@ -4,7 +4,7 @@ import { ActivityIndicator, Animated, FlatList, Pressable, RefreshControl, Style
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 
-import { BottomNav, useBottomNavPadding } from '@/components/BottomNav';
+import { useBottomNavPadding } from '@/components/BottomNav';
 import { Icon, type IconName } from '@/components/Icon';
 import { friendlyError, isDeregistered } from '@/messages';
 import { apiPost, INSTALL_SECRET_KEY, requireInstallSecret } from '@/native-api';
@@ -536,7 +536,6 @@ export default function NotificationsScreen() {
         />
       )}
 
-      <BottomNav unread={unreadCount} />
     </SafeAreaView>
   );
 }

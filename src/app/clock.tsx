@@ -1,11 +1,11 @@
-import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 
-import { BottomNav, useBottomNavPadding } from '@/components/BottomNav';
+import { useBottomNavPadding } from '@/components/BottomNav';
 import { Brand } from '@/components/Brand';
 import { Icon } from '@/components/Icon';
 import { ShiftProgress } from '@/components/ShiftProgress';
@@ -84,22 +84,6 @@ export default function ClockScreen() {
 
   useEffect(reload, [reload]);
 
-  // Re-read every time this screen is focused, not just on mount: coming back from
-  // the inbox after reading everything used to leave the badge showing the old
-  // count until the next reload.
-  const refreshBadge = useCallback(() => {
-    if (demo) return;
-    let mounted = true;
-    SecureStore.getItemAsync(INSTALL_SECRET_KEY)
-      .then((secret) => (secret
-        ? apiPost<{ unread: number }>('/api/mobile/notifications', { install_secret: secret, before: null })
-        : null))
-      .then((r) => { if (mounted && r) setUnread(r.unread); })
-      .catch(() => { /* the badge is not worth an error in front of a picker */ });
-    return () => { mounted = false; };
-  }, [demo]);
-
-  useFocusEffect(refreshBadge);
 
   // Once per launch on a registered phone: ask for notification permission and
   // register for shift reminders. Not in the preview (no real phone behind it).
@@ -118,7 +102,6 @@ export default function ClockScreen() {
   // Unread badge. Its own small request rather than part of the session payload,
   // so a notifications outage can never stop the clock screen loading — the thing
   // pickers actually need it for.
-  const [unread, setUnread] = useState(0);
   function askForSelfie(): Promise<string | null> {
     return new Promise((resolve) => {
       selfieResolver.current = resolve;
@@ -360,8 +343,6 @@ export default function ClockScreen() {
         )}
 
       </ScrollView>
-
-      <BottomNav unread={unread} />
       {/* Stays mounted and driven by `visible`, rather than being conditionally
           rendered. RN's Modal keeps itself rendered after visible goes false
           purely so it can animate out, so unmounting it here would take the

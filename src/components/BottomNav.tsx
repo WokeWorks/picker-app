@@ -3,7 +3,10 @@ import { useEffect, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import * as SecureStore from 'expo-secure-store';
+
 import { Icon, type IconName } from '@/components/Icon';
+import { apiPost, INSTALL_SECRET_KEY } from '@/native-api';
 import { setNavDirection } from '@/nav-direction';
 import { C } from '@/theme';
 
@@ -13,6 +16,14 @@ import { C } from '@/theme';
  * Home first, because that is where the app lands and where clocking in happens.
  * Profile is deliberately NOT here: it stays in the top-right corner where it has
  * always been, and it is a destination rather than a place to live.
+ *
+ * RENDERED ONCE, BY THE ROOT LAYOUT, not by each screen. That is what keeps it
+ * still: a bar rendered inside a screen slides away with that screen's transition,
+ * so changing tabs animated the bar along with the page it belongs to. Sitting
+ * above the Stack instead, it stays put while the pages move underneath.
+ *
+ * It therefore decides for itself whether to appear, and reads its own unread
+ * count -- no screen is passing it anything.
  *
  * Pinned with `position: 'absolute'`, so it does not scroll away. Screens must
  * reserve room for it with `useBottomNavPadding()` -- anything that does not will
@@ -39,13 +50,18 @@ export function useBottomNavPadding(): number {
   return BOTTOM_NAV_HEIGHT + insets.bottom + 12;
 }
 
-export function BottomNav({ unread = 0 }: { unread?: number }) {
+export function BottomNav() {
   const insets = useSafeAreaInsets();
+  const [unread, setUnread] = useState(0);
   const pathname = usePathname();
   // Carried through to the schedule screen, which is the only other screen that
   // reads it. The Schedule button this bar replaced passed it too, and without
   // this the DEV walkthrough would land on real data halfway through.
   const { demo } = useLocalSearchParams<{ demo?: string }>();
+  // Only on the three it links to. Profile, documents, the viewer and setup are
+  // all destinations rather than tabs, and a bar on them would offer a way out of
+  // a screen that already has one.
+  const onTab = TABS.some((t) => pathname === t.href);
   const active = Math.max(0, TABS.findIndex((t) => pathname.startsWith(t.href)));
 
   // The bubble slides between tabs rather than appearing under the new one, so the
@@ -64,6 +80,31 @@ export function BottomNav({ unread = 0 }: { unread?: number }) {
       useNativeDriver: true,
     }).start();
   }, [active, slide]);
+
+  // Re-read on every tab change, which is the only moment the count can have
+  // moved without this component knowing: reading notifications happens on the
+  // notifications screen, and leaving it is a tab change. Failures are swallowed
+  // -- a stale badge is not worth an error in front of a picker.
+  useEffect(() => {
+    if (!onTab) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const secret = await SecureStore.getItemAsync(INSTALL_SECRET_KEY);
+        if (!secret) return;
+        const res = await apiPost<{ unread: number }>('/api/mobile/notifications', {
+          install_secret: secret,
+          before: null,
+        });
+        if (alive) setUnread(res.unread ?? 0);
+      } catch {
+        // Leave the previous count rather than zeroing a badge that may be right.
+      }
+    })();
+    return () => { alive = false; };
+  }, [pathname, onTab]);
+
+  if (!onTab) return null;
 
   const cell = barWidth / TABS.length;
 

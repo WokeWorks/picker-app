@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { BottomNav, useBottomNavPadding } from '@/components/BottomNav';
+import { useBottomNavPadding } from '@/components/BottomNav';
 import { Icon } from '@/components/Icon';
 import { duration } from '@/components/ShiftProgress';
 import { fmtTime } from '@/components/StoreCard';
@@ -112,8 +112,6 @@ export default function WeekScreen() {
           </>
         )}
       </ScrollView>
-
-      <BottomNav />
     </SafeAreaView>
   );
 }

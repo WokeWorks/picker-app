@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { BottomNav } from '@/components/BottomNav';
 import { LockGate } from '@/components/LockGate';
 import { ensureNotificationChannels, setupNotifications } from '@/notifications';
 import { C } from '@/theme';
@@ -45,6 +46,11 @@ export default function RootLayout() {
             gestureEnabled: true,
           }}
         />
+        {/* ABOVE the Stack, so it stays still while the pages slide underneath.
+            Rendered inside a screen it would animate away with that screen, which
+            is the whole reason it lives here. It decides for itself which routes
+            to appear on. */}
+        <BottomNav />
       </LockGate>
     </SafeAreaProvider>
   );

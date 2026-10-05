@@ -1,12 +1,14 @@
-import { router, useFocusEffect } from 'expo-router';
+import { Stack, router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 
+import { BottomNav, useBottomNavPadding } from '@/components/BottomNav';
 import { Icon, type IconName } from '@/components/Icon';
 import { friendlyError, isDeregistered } from '@/messages';
 import { apiPost, INSTALL_SECRET_KEY, requireInstallSecret } from '@/native-api';
+import { takeNavDirection } from '@/nav-direction';
 import { C } from '@/theme';
 
 type Note = {
@@ -79,6 +81,10 @@ export default function NotificationsScreen() {
   const [state, setState] = useState<InboxState>('unread');
   const [notes, setNotes] = useState<Note[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const navPad = useBottomNavPadding();
+  // Taken ONCE as this screen mounts, not on every render: re-reading mid
+  // transition would change the animation under it. See src/nav-direction.ts.
+  const [navAnimation] = useState(takeNavDirection);
   /**
    * Rows that have been read but are still on screen, mid-settle or mid-exit.
    *
@@ -387,6 +393,7 @@ export default function NotificationsScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <Stack.Screen options={{ animation: navAnimation }} />
       <View style={styles.header}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.back} hitSlop={8}>
           <Icon name="arrowLeft" size={20} color={C.brand} strokeWidth={2} />
@@ -473,7 +480,7 @@ export default function NotificationsScreen() {
         <FlatList
           data={notes}
           keyExtractor={(n) => n.id}
-          contentContainerStyle={notes.length ? styles.list : styles.listEmpty}
+          contentContainerStyle={[notes.length ? styles.list : styles.listEmpty, { paddingBottom: navPad }]}
           // `refreshing` was hardcoded false, so pulling down fetched a new page
           // and gave no sign it had: it looked like nothing happened, which is how
           // someone concludes the screen is broken and pulls repeatedly.
@@ -528,6 +535,8 @@ export default function NotificationsScreen() {
           }}
         />
       )}
+
+      <BottomNav unread={unreadCount} />
     </SafeAreaView>
   );
 }

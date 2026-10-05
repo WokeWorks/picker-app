@@ -1,10 +1,11 @@
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 
+import { BottomNav, useBottomNavPadding } from '@/components/BottomNav';
 import { Brand } from '@/components/Brand';
 import { Icon } from '@/components/Icon';
 import { ShiftProgress } from '@/components/ShiftProgress';
@@ -15,6 +16,7 @@ import { CameraSheet } from '@/components/CameraSheet';
 import { requestPunchProof } from '@/integrity';
 import { registerForReminders } from '@/notifications';
 import { friendlyError, isDeregistered, isDeregisteredStuck } from '@/messages';
+import { takeNavDirection } from '@/nav-direction';
 import { C } from '@/theme';
 import { apiPost, apiPostFile, INSTALL_SECRET_KEY, readAppAttestKeyId, requireInstallSecret } from '@/native-api';
 
@@ -41,6 +43,10 @@ function dayLabel(iso: string) {
 }
 
 export default function ClockScreen() {
+  const navPad = useBottomNavPadding();
+  // Taken ONCE as this screen mounts, not on every render: re-reading mid
+  // transition would change the animation under it. See src/nav-direction.ts.
+  const [navAnimation] = useState(takeNavDirection);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -113,13 +119,6 @@ export default function ClockScreen() {
   // so a notifications outage can never stop the clock screen loading — the thing
   // pickers actually need it for.
   const [unread, setUnread] = useState(0);
-  // 380, not 360. At exactly 360 -- one of the commonest Android widths -- the
-  // full row measured about 314dp against 312 available once the new gap was
-  // counted, so the threshold has to sit ABOVE it rather than on it. The gap is
-  // 4 for the same reason.
-  const { width } = useWindowDimensions();
-  const narrow = width < 380;
-
   function askForSelfie(): Promise<string | null> {
     return new Promise((resolve) => {
       selfieResolver.current = resolve;
@@ -217,7 +216,15 @@ export default function ClockScreen() {
   }
 
   if (loading && !session) {
-    return <SafeAreaView style={styles.safe}><View style={styles.loading}><ActivityIndicator color={C.brand} size="large" /></View></SafeAreaView>;
+    // The option goes on THIS branch too. React Navigation reads it from whatever
+    // the screen rendered first, and arriving here while still loading would
+    // otherwise fall back to the stack default and slide in from the wrong side.
+    return (
+      <SafeAreaView style={styles.safe}>
+        <Stack.Screen options={{ animation: navAnimation }} />
+        <View style={styles.loading}><ActivityIndicator color={C.brand} size="large" /></View>
+      </SafeAreaView>
+    );
   }
 
   const location = session?.locations[0];
@@ -231,45 +238,20 @@ export default function ClockScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <Stack.Screen options={{ animation: navAnimation }} />
       <ScrollView
-        contentContainerStyle={styles.page}
+        contentContainerStyle={[styles.page, { paddingBottom: navPad }]}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} tintColor={C.brand} colors={[C.brand]} />}
       >
         <View style={styles.header}>
           {/* The only element that may shrink: the three controls are fixed-size
               targets and must stay tappable. */}
           <View style={styles.brandShrink}><Brand /></View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Your shift schedule"
-            onPress={() => router.push(demo ? '/week?demo=1' : '/week')}
-            style={({ pressed }) => [styles.scheduleBtn, pressed && { backgroundColor: C.pressed }]}
-            hitSlop={6}
-          >
-            <Icon name="calendar" size={17} color={C.brand} strokeWidth={2} />
-            {/* The word is dropped on a narrow phone. With the brand, Schedule,
-                the bell and the profile button, the row needed more than the
-                272dp a 320dp screen leaves after padding -- and a row that cannot
-                shrink clips, so the profile button simply vanished. The icon and
-                its accessibility label still say what it is. */}
-            {!narrow && <Text style={styles.scheduleText}>Schedule</Text>}
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={unread ? `Notifications, ${unread} unread` : 'Notifications'}
-            onPress={() => router.push('/notifications')}
-            style={({ pressed }) => [styles.bellBtn, pressed && { backgroundColor: C.pressed }]}
-            hitSlop={6}
-          >
-            <Icon name="alert" size={18} color={C.brand} strokeWidth={2} />
-            {unread > 0 && (
-              <View style={styles.badge}>
-                {/* Past 9 the exact number stops mattering and starts breaking
-                    the circle, which is the usual convention for a reason. */}
-                <Text style={styles.badgeText}>{unread > 9 ? '9+' : unread}</Text>
-              </View>
-            )}
-          </Pressable>
+          {/* Schedule and notifications now live in the bar at the bottom. Profile
+              stays here: it is a destination rather than a place to live, and the
+              top-right corner is where it has always been. Dropping two buttons
+              from this row also ends the narrow-phone clipping that used to make
+              the profile button vanish entirely on a 320dp screen. */}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Your details and documents"
@@ -378,6 +360,8 @@ export default function ClockScreen() {
         )}
 
       </ScrollView>
+
+      <BottomNav unread={unread} />
       {/* Stays mounted and driven by `visible`, rather than being conditionally
           rendered. RN's Modal keeps itself rendered after visible goes false
           purely so it can animate out, so unmounting it here would take the
@@ -432,16 +416,5 @@ const styles = StyleSheet.create({
     width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: C.line, backgroundColor: C.paper,
   },
-  badge: {
-    position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, borderRadius: 9,
-    paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: C.danger, borderWidth: 2, borderColor: C.canvas,
-  },
-  badgeText: { color: C.onBrand, fontSize: 10, fontWeight: '800' },
-  scheduleBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8,
-    borderRadius: 99, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line,
-  },
-  scheduleText: { color: C.brand, fontSize: 14, fontWeight: '700' },
   brandShrink: { flexShrink: 1, minWidth: 0 },
 });

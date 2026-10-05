@@ -10,7 +10,7 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
 export type IconName =
   | 'check' | 'checkCircle' | 'alert' | 'info' | 'arrowLeft' | 'arrowRight'
   | 'pin' | 'clock' | 'lock' | 'face' | 'fingerprint' | 'phone' | 'tea' | 'calendar'
-  | 'person' | 'document' | 'upload' | 'hourglass' | 'signOut'
+  | 'person' | 'document' | 'upload' | 'hourglass' | 'signOut' | 'home'
   | 'flipCamera' | 'gallery' | 'camera';
 
 function glyph(name: IconName) {
@@ -34,6 +34,8 @@ function glyph(name: IconName) {
     // The remaining five follow Tabler Icons (MIT), as face/fingerprint/tea above
     // do: user, file-text, upload, hourglass, logout.
     case 'person': return <><Circle cx={12} cy={8} r={3.5} /><Path d="M5 20.5a7 7 0 0 1 14 0" /></>;
+    // House with a door, in the same stroked style as the rest of the set.
+    case 'home': return <><Path d="M3.5 10.8L12 3.5l8.5 7.3" /><Path d="M5.5 9.6V20h13V9.6" /><Path d="M9.8 20v-5.4h4.4V20" /></>;
     case 'document': return <><Path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z" /><Path d="M14 3.5v5h5" /><Path d="M9 13h6M9 16.5h4" /></>;
     case 'upload': return <><Path d="M4 16.5v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /><Path d="M12 16V3.5" /><Path d="M7.5 8L12 3.5 16.5 8" /></>;
     case 'hourglass': return <><Path d="M7 3.5h10" /><Path d="M7 20.5h10" /><Path d="M8 3.5v3.6a4 4 0 0 0 1.6 3.2L12 12l-2.4 1.7A4 4 0 0 0 8 16.9v3.6" /><Path d="M16 3.5v3.6a4 4 0 0 1-1.6 3.2L12 12l2.4 1.7a4 4 0 0 1 1.6 3.2v3.6" /></>;

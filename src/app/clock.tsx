@@ -12,11 +12,11 @@ import { DonePanel } from '@/components/DonePanel';
 import { EmptyCard, StoreCard } from '@/components/StoreCard';
 import { demoSession, type DemoState } from '@/demo';
 import { CameraSheet } from '@/components/CameraSheet';
-import { requestIntegrityToken } from '@/integrity';
+import { requestPunchProof } from '@/integrity';
 import { registerForReminders } from '@/notifications';
 import { friendlyError, isDeregistered, isDeregisteredStuck } from '@/messages';
 import { C } from '@/theme';
-import { apiPost, apiPostFile, INSTALL_SECRET_KEY, requireInstallSecret } from '@/native-api';
+import { apiPost, apiPostFile, INSTALL_SECRET_KEY, readAppAttestKeyId, requireInstallSecret } from '@/native-api';
 
 type Store = { name: string; chain?: string | null; area?: string | null; lat: number | null; lng: number | null };
 
@@ -173,11 +173,18 @@ export default function ClockScreen() {
         gps_accuracy: position.coords.accuracy,
         location_mocked: false, // a mocked position is refused above, before any request
       });
-      const integrityToken = await requestIntegrityToken(challenge.request_hash);
+      // iOS signs challenge.payload itself; Android proves against its hash. Both
+      // come from the same challenge response, so neither can drift from what the
+       // server will recompute.
+      const proof = await requestPunchProof({
+        payload: challenge.payload,
+        requestHash: challenge.request_hash,
+        keyId: await readAppAttestKeyId(),
+      });
       await apiPostFile('/api/mobile/punch/commit', {
         install_secret: installSecret,
         payload: challenge.payload,
-        integrity_token: integrityToken,
+        ...proof,
       }, selfieUri);
       await refresh();
     } catch (error) {

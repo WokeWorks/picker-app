@@ -18,10 +18,10 @@ import * as SecureStore from 'expo-secure-store';
 
 import { biometricFailureMessage } from '@/biometric';
 import { Icon } from '@/components/Icon';
-import { requestIntegrityToken } from '@/integrity';
+import { requestSetupProof } from '@/integrity';
 import { friendlyError } from '@/messages';
 import { C } from '@/theme';
-import { apiPost, DEVICE_ID_KEY, encodeAndroidEnrollmentPayload, formatEnrollmentCode, formatPhone, INSTALL_SECRET_KEY, isUaeMobile, phoneDigits, normalizeEnrollmentCode, sha256 } from '@/native-api';
+import { apiPost, DEVICE_ID_KEY, encodeAndroidEnrollmentPayload, encodeIosEnrollmentPayload, formatEnrollmentCode, formatPhone, INSTALL_SECRET_KEY, isUaeMobile, phoneDigits, normalizeEnrollmentCode, sha256, writeAppAttestKeyId } from '@/native-api';
 
 export default function EnrollScreen() {
   const [phone, setPhone] = useState('');
@@ -55,20 +55,35 @@ export default function EnrollScreen() {
         if (why) Alert.alert('Setup not approved', why);
         return;
       }
-      if (Platform.OS !== 'android') throw new Error('iPhone setup is not available yet.');
+      const isIos = Platform.OS === 'ios';
 
       // A fresh install secret on every setup attempt, so a re-registered phone
       // never reuses a revoked or replaced credential.
       const installSecret = `${Crypto.randomUUID()}${Crypto.randomUUID()}`;
-      const deviceLabel = 'Android picker phone';
+      const deviceLabel = isIos ? 'iPhone picker phone' : 'Android picker phone';
       const codeSha256 = await sha256(normalizeEnrollmentCode(code));
       const installIdHash = await sha256(installSecret);
-      const proofPayload = encodeAndroidEnrollmentPayload({ codeSha256, installIdHash, deviceLabel });
-      const requestHash = await sha256(proofPayload);
-      const integrityToken = await requestIntegrityToken(requestHash);
+      const payloadArgs = { codeSha256, installIdHash, deviceLabel };
+      // Android proves itself over a HASH of its payload; iOS signs the payload
+      // string itself, which the native module hashes. Both are built here so the
+      // two paths cannot drift apart.
+      const androidPayload = encodeAndroidEnrollmentPayload(payloadArgs);
+      const proof = await requestSetupProof({
+        androidRequestHash: await sha256(androidPayload),
+        iosChallenge: encodeIosEnrollmentPayload(payloadArgs),
+      });
       const enrolled = await apiPost<{ device_id: string }>('/api/mobile/enroll', {
-        code, phone: phoneDigits(phone), platform: 'android', install_secret: installSecret, device_label: deviceLabel, integrity_token: integrityToken,
+        code,
+        phone: phoneDigits(phone),
+        install_secret: installSecret,
+        device_label: deviceLabel,
+        ...proof,
       }, { timeoutMs: 45_000 });
+      // The key id is stored BEFORE the install secret. readEnrolment treats the
+      // install secret as the signal that this phone is set up, so if the app were
+      // killed between the two writes, the other order would leave a phone that
+      // looks enrolled and can never sign a punch.
+      if (proof.platform === 'ios') await writeAppAttestKeyId(proof.key_id);
       await SecureStore.setItemAsync(INSTALL_SECRET_KEY, installSecret, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
       await SecureStore.setItemAsync(DEVICE_ID_KEY, enrolled.device_id, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
       router.replace('/clock');

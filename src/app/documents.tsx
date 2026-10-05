@@ -51,6 +51,16 @@ export default function DocumentsScreen() {
   // The document waiting on a source choice. Only used where photosOk is true; on
   // Android the picker opens straight away, exactly as before.
   const [chooserFor, setChooserFor] = useState<ProfileDocument | null>(null);
+  /**
+   * Whether ANY source is available, which is what an Upload button promises.
+   *
+   * Not storageOk alone. On iOS the two pickers are independent modules, so a
+   * build with Photos but no Files would have had every Upload button removed
+   * while a perfectly good source sat behind it. The Files option inside the
+   * sheet is still gated on storageOk separately -- that one really is about
+   * Files.
+   */
+  const canPick = storageOk || photosOk;
   // See profile.tsx: iOS will not present a picker over the sheet's Modal, so the
   // choice is queued and run once the sheet has really gone.
   const afterSheetRef = useRef<(() => void) | null>(null);
@@ -163,9 +173,11 @@ export default function DocumentsScreen() {
   }, []);
 
   const choose = useCallback((doc: ProfileDocument) => {
-    if (photosOk) setChooserFor(doc);
+    // Both sources: ask which. Only one: open it, with no pointless extra tap.
+    if (photosOk && storageOk) setChooserFor(doc);
+    else if (photosOk) void chooseFromPhotos(doc);
     else void chooseFromStorage(doc);
-  }, [photosOk, chooseFromStorage]);
+  }, [photosOk, storageOk, chooseFromPhotos, chooseFromStorage]);
 
   const send = useCallback(async () => {
     if (!preview || sendingRef.current) return;
@@ -269,7 +281,7 @@ export default function DocumentsScreen() {
             {/* With no camera on this screen, a build without the file picker's
                 native module cannot upload anything at all. Say so once at the
                 top rather than leaving nine buttons that throw. */}
-            {!storageOk && (
+            {!canPick && (
               <View style={styles.notice}>
                 <Icon name="alert" size={22} color={C.danger} strokeWidth={2.2} />
                 <Text style={styles.noticeText}>
@@ -281,12 +293,12 @@ export default function DocumentsScreen() {
               <DocumentRow
                 key={doc.doc_type}
                 doc={doc}
-                // BOTH: storageOk says this build can open a picker at all,
+                // BOTH: canPick says this build can open SOME picker,
                 // doc.can_upload is the server's rule about this document. They
                 // answer different questions, and the server's is the one the
                 // route will actually enforce -- so a button shown against it is
                 // a button that fails after the picker has chosen a file.
-                canUpload={storageOk && doc.can_upload}
+                canUpload={canPick && doc.can_upload}
                 onUpload={() => choose(doc)}
                 onViewInApp={openViewer}
               />

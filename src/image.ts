@@ -6,6 +6,7 @@
 // WhatsApp -- and sending it unresized would mean a slow upload on shop mobile
 // data and, past the route's cap, an outright refusal. Two copies of this logic
 // would mean two places for that to be got wrong.
+import { Platform } from 'react-native';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 
 /**
@@ -199,7 +200,84 @@ export async function pickFromStorage(
 }
 
 /**
- * Why there is no separate "gallery" picker any more.
+ * Pick an image from the PHOTO LIBRARY. iOS only, and the reason is concrete.
+ *
+ * On iOS, getDocumentAsync opens the FILES app, and an iPhone keeps its photos in
+ * PHOTOS, not Files. So the document picker opens onto a screen with none of the
+ * user's pictures in it -- there is nothing wrong with the call, there is simply
+ * nothing there to choose. Android does not have this problem: its document UI
+ * lists every provider on the phone, gallery apps included, which is exactly why
+ * the comment below says a separate gallery picker was removed.
+ *
+ * So this is ADDITIVE and iOS-only. The Android path is untouched: it still goes
+ * through getDocumentAsync, still reaches Samsung Gallery and Google Photos through
+ * the provider drawer, and still handles PDFs.
+ *
+ * PDFs are not offered here. The photo library holds no PDFs; on iOS those live in
+ * Files, which is what pickFromStorage still covers.
+ */
+let cachedImagePicker: typeof import('expo-image-picker') | null | undefined;
+
+async function imagePicker(): Promise<typeof import('expo-image-picker') | null> {
+  if (cachedImagePicker !== undefined) return cachedImagePicker;
+  try {
+    cachedImagePicker = await import('expo-image-picker');
+  } catch {
+    cachedImagePicker = null;
+  }
+  return cachedImagePicker;
+}
+
+/**
+ * Whether to offer "Photos" as a separate source.
+ *
+ * iOS only by design -- see above. Returning false on Android keeps that platform's
+ * behaviour exactly as it was rather than adding a second route to the same place.
+ */
+export async function isPhotoLibraryAvailable(): Promise<boolean> {
+  if (Platform.OS !== 'ios') return false;
+  return !!(await imagePicker());
+}
+
+export async function pickFromPhotoLibrary(
+  options: { maxSide: number },
+): Promise<PickedFile | null> {
+  const Picker = await imagePicker();
+  if (!Picker) throw new Error(PICKER_UNAVAILABLE);
+
+  // No permission request: PHPickerViewController runs out of process and hands
+  // back only what was chosen, so iOS grants no library access and asks for none.
+  const result = await Picker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    allowsMultipleSelection: false,
+    // No editing step. Cropping a face before the server measures it would change
+    // the very distances being compared against the reference photo.
+    allowsEditing: false,
+    exif: false,
+  });
+
+  if (result.canceled) return null;
+  const asset = result.assets?.[0];
+  if (!asset?.uri) throw new Error('That photo could not be read. Try another one.');
+
+  // Width and height ARE reported here, unlike the document picker, so
+  // resizeForUpload can skip the re-encode when the photo is already small enough.
+  const uri = await resizeForUpload(asset.uri, {
+    maxSide: options.maxSide,
+    width: asset.width,
+    height: asset.height,
+  });
+  // An iPhone photo is usually HEIC; the resize writes JPEG, so report JPEG. When
+  // the resize was skipped the original is already small, and the server accepts
+  // what the picker reports.
+  return { uri, mimeType: uri === asset.uri ? (asset.mimeType ?? 'image/jpeg') : 'image/jpeg', name: asset.fileName ?? null };
+}
+
+/**
+ * Why there is no separate "gallery" picker any more ON ANDROID.
+ *
+ * (iOS does have one again -- see pickFromPhotoLibrary above. This note is about
+ * Android, where the document picker genuinely does reach every gallery app.)
  *
  * There was one, built on ACTION_GET_CONTENT through expo-intent-launcher, and it
  * failed twice over:

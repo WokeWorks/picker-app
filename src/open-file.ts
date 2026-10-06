@@ -1,6 +1,21 @@
 // Opening a stored document in whatever app the picker has for it.
 //
-// Three steps, and each one is doing something the others cannot:
+// BOTH PLATFORMS DOWNLOAD FIRST, then diverge, because the two systems hand a file
+// to another app in completely different ways:
+//
+//   Android  content:// URI + ACTION_VIEW. Android picks the app, or shows a
+//            chooser when several can handle the type.
+//   iOS      the share sheet, through expo-sharing. There is no ACTION_VIEW and no
+//            FileProvider; the share sheet is how iOS offers Quick Look and every
+//            app that can open the type, and it is the only first-party route.
+//
+// The download is common to both and is deliberate for a second reason beyond
+// Android's: the copy lands in OUR cache, where sweepViewedCache can delete it an
+// hour later. These are passports, and a viewer that left them wherever the OS
+// pleased would have nothing enforcing that.
+//
+// The Android path, unchanged, is three steps and each does something the others
+// cannot:
 //
 //   1. DOWNLOAD the signed URL to the app's cache. Android cannot hand a remote
 //      https URL to a PDF viewer -- it would open a browser, which for a signed
@@ -82,12 +97,27 @@ export async function openRemoteFile(
     throw new Error('That file could not be downloaded. Check your connection and try again.');
   }
 
-  // iOS has no equivalent chooser and no FileProvider here. The app is Android-only
-  // today (enroll.tsx refuses anything else), so this is a guard rather than a
-  // branch -- it stops the iOS build silently doing nothing when that changes.
-  if (Platform.OS !== 'android' || !intent) {
-    throw new Error('Opening documents is only available on Android right now.');
+  if (Platform.OS === 'ios') {
+    const sharing = await import('expo-sharing').catch(() => null);
+    // isAvailableAsync is a real check, not a formality: it is false on a simulator
+    // without the share sheet, and a clear sentence beats a promise that resolves
+    // having shown nothing.
+    if (!sharing || !(await sharing.isAvailableAsync())) throw new Error(OPEN_UNAVAILABLE);
+    try {
+      await sharing.shareAsync(downloaded.uri, {
+        mimeType,
+        // iOS routes on the UTI, not the MIME type. Without it a PDF can be offered
+        // as a generic file and Quick Look does not appear.
+        UTI: utiFor(mimeType),
+        dialogTitle: options.fileName ?? 'Document',
+      });
+    } catch {
+      throw new Error('That file could not be opened.');
+    }
+    return;
   }
+
+  if (!intent) throw new Error(OPEN_UNAVAILABLE);
 
   let contentUri: string;
   try {
@@ -110,6 +140,23 @@ export async function openRemoteFile(
     // with no PDF reader, most likely. Say what to do about it.
     throw new Error('No app on this phone can open that file. Install a PDF reader, or ask your supervisor to email it.');
   }
+}
+
+/**
+ * The iOS Uniform Type Identifier for a MIME type.
+ *
+ * iOS decides which apps can open a file from its UTI, so handing over only the
+ * MIME type gets a PDF offered as an undifferentiated file with no Quick Look.
+ * `public.data` is the honest fallback -- it means "some file", which is exactly
+ * what we know when the type is unrecognised.
+ */
+function utiFor(mimeType: string): string {
+  if (mimeType === 'application/pdf') return 'com.adobe.pdf';
+  if (mimeType === 'image/png') return 'public.png';
+  if (mimeType === 'image/jpeg') return 'public.jpeg';
+  if (mimeType === 'image/webp') return 'org.webmproject.webp';
+  if (mimeType === 'image/heic' || mimeType === 'image/heif') return 'public.heic';
+  return 'public.data';
 }
 
 /** Extension from the MIME type, since the stored filename may have none. */

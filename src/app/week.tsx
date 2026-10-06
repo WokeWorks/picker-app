@@ -1,14 +1,16 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useBottomNavPadding } from '@/components/BottomNav';
 import { Icon } from '@/components/Icon';
 import { duration } from '@/components/ShiftProgress';
 import { fmtTime } from '@/components/StoreCard';
 import { hasPin, openDirections } from '@/maps';
 import { friendlyError, isDeregistered } from '@/messages';
 import { apiPost, requireInstallSecret } from '@/native-api';
+import { takeNavDirection } from '@/nav-direction';
 import { C } from '@/theme';
 import { demoWeek, type Week, type WeekDay } from '@/week';
 
@@ -64,10 +66,15 @@ export default function WeekScreen() {
   const shifts = week?.days.filter((d) => d.status === 'scheduled').length ?? 0;
   // Next week has no "worked so far": two stats split the box in half.
   const statWidth = which === 'this' ? '33.333%' : '50%';
+  const navPad = useBottomNavPadding();
+  // Taken ONCE as this screen mounts, not on every render: re-reading mid
+  // transition would change the animation under it. See src/nav-direction.ts.
+  const [navAnimation] = useState(takeNavDirection);
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.page} refreshControl={<RefreshControl refreshing={loading && !!week} onRefresh={load} tintColor={C.brand} colors={[C.brand]} />}>
+      <Stack.Screen options={{ animation: navAnimation }} />
+      <ScrollView contentContainerStyle={[styles.page, { paddingBottom: navPad }]} refreshControl={<RefreshControl refreshing={loading && !!week} onRefresh={load} tintColor={C.brand} colors={[C.brand]} />}>
         <View style={styles.header}>
           <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={({ pressed }) => [styles.backBtn, pressed && { backgroundColor: C.pressed }]} hitSlop={8}>
             <Icon name="arrowLeft" size={20} color={C.ink} strokeWidth={2} />

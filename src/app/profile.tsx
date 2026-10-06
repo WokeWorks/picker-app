@@ -7,7 +7,7 @@ import * as SecureStore from 'expo-secure-store';
 import { CameraSheet } from '@/components/CameraSheet';
 import { Icon } from '@/components/Icon';
 import { SourceSheet } from '@/components/SourceSheet';
-import { MAX_UPLOAD_SIDE, isStoragePickerAvailable, pickFromStorage } from '@/image';
+import { MAX_UPLOAD_SIDE, isPhotoLibraryAvailable, isStoragePickerAvailable, pickFromPhotoLibrary, pickFromStorage } from '@/image';
 import { DEVICE_ID_KEY, INSTALL_SECRET_KEY, apiPost, apiPostFile, formatPhone, clearKey, requireInstallSecret } from '@/native-api';
 import { friendlyError } from '@/messages';
 import { type Profile } from '@/profile';
@@ -46,6 +46,16 @@ export default function ProfileScreen() {
   // rather than offer one that throws. Defaults to false so a slow check shows the
   // camera-only sheet instead of a row that might fail.
   const [storageOk, setStorageOk] = useState(false);
+  const [photosOk, setPhotosOk] = useState(false);
+  /**
+   * What to do once the chooser sheet has actually left the screen.
+   *
+   * On iOS a picker is a native screen, and iOS will not present one over a view
+   * controller that is already presenting -- which the sheet, being a Modal, is.
+   * Starting a picker straight from an option's onPress therefore fails on iOS.
+   * Queue it here and let the sheet's onClosed run it.
+   */
+  const afterSheetRef = useRef<(() => void) | null>(null);
 
   // Which load is current. Two can overlap -- a pull-to-refresh while send()'s
   // reload is in flight -- and without this the OLDER response can land second
@@ -96,6 +106,9 @@ export default function ProfileScreen() {
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => { void isStoragePickerAvailable().then(setStorageOk); }, []);
+  // iOS only. See pickFromPhotoLibrary: the Files picker cannot see an iPhone's
+  // photos, so without this there is no way to choose an existing one.
+  useEffect(() => { void isPhotoLibraryAvailable().then(setPhotosOk); }, []);
 
   const chooseFromStorage = useCallback(async () => {
     // The drawer stays mounted for its close animation, so its rows are still
@@ -110,6 +123,21 @@ export default function ProfileScreen() {
       // read one. The picker only offers images.
       const picked = await pickFromStorage({ maxSide: MAX_UPLOAD_SIDE });
       // null means they backed out of the OS picker — not an error, no alert.
+      if (picked) setPreview(picked.uri);
+    } catch (e) {
+      Alert.alert('Could not use that photo', e instanceof Error ? e.message : 'Try another one.');
+    } finally {
+      pickingRef.current = false;
+    }
+  }, []);
+
+  // iOS only. Same guards and same error handling as chooseFromStorage, so the two
+  // sources cannot drift in how a cancel or a failure is treated.
+  const chooseFromPhotos = useCallback(async () => {
+    if (pickingRef.current) return;
+    pickingRef.current = true;
+    try {
+      const picked = await pickFromPhotoLibrary({ maxSide: MAX_UPLOAD_SIDE });
       if (picked) setPreview(picked.uri);
     } catch (e) {
       Alert.alert('Could not use that photo', e instanceof Error ? e.message : 'Try another one.');
@@ -400,19 +428,34 @@ export default function ProfileScreen() {
           {
             icon: 'camera',
             label: 'Take a photo',
-            onPress: () => { setChooserOpen(false); setCameraOpen(true); },
+            onPress: () => { afterSheetRef.current = () => setCameraOpen(true); setChooserOpen(false); },
           },
           {
             icon: 'gallery',
-            // "from your phone", not "from your gallery": Android's picker opens
-            // on Files with every source in its drawer, so promising a gallery
-            // would describe a screen they are not looking at.
-            label: 'Choose from your phone',
+            label: 'Choose from Photos',
+            // iOS only, and it is the one that matters there: an iPhone's pictures
+            // are in Photos, which the Files picker below cannot see at all.
+            available: photosOk,
+            onPress: () => { afterSheetRef.current = () => void chooseFromPhotos(); setChooserOpen(false); },
+          },
+          {
+            icon: 'gallery',
+            // Named for what each platform actually opens. On Android the picker
+            // opens on Files with every source in its drawer -- gallery apps
+            // included -- so promising "a gallery" would describe a screen they are
+            // not looking at. On iOS it really is Files, and Photos is the option
+            // above.
+            label: photosOk ? 'Choose from Files' : 'Choose from your phone',
             available: storageOk,
-            onPress: () => void chooseFromStorage(),
+            onPress: () => { afterSheetRef.current = () => void chooseFromStorage(); setChooserOpen(false); },
           },
         ]}
-        onCancel={() => setChooserOpen(false)}
+        onCancel={() => { afterSheetRef.current = null; setChooserOpen(false); }}
+        onClosed={() => {
+          const run = afterSheetRef.current;
+          afterSheetRef.current = null;
+          run?.();
+        }}
       />
 
       {/* Capture, then preview. The sheet closes on capture and the preview card

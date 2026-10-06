@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { BottomNav } from '@/components/BottomNav';
 import { LockGate } from '@/components/LockGate';
 import { ensureNotificationChannels, setupNotifications } from '@/notifications';
 import { C } from '@/theme';
@@ -34,7 +35,22 @@ export default function RootLayout() {
       {/* A registered phone asks for a fingerprint or face before showing
           anything. Convenience, not a punch-path control -- see src/lock.ts. */}
       <LockGate>
-        <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: C.canvas } }} />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            animation: 'slide_from_right',
+            contentStyle: { backgroundColor: C.canvas },
+            // iOS enables the edge swipe by default; Android does not. Turned on so
+            // going back feels the same on both, which is the point of these being
+            // routes rather than modals.
+            gestureEnabled: true,
+          }}
+        />
+        {/* ABOVE the Stack, so it stays still while the pages slide underneath.
+            Rendered inside a screen it would animate away with that screen, which
+            is the whole reason it lives here. It decides for itself which routes
+            to appear on. */}
+        <BottomNav />
       </LockGate>
     </SafeAreaProvider>
   );

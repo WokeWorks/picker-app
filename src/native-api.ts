@@ -8,6 +8,12 @@ export const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://ap
 export const GOOGLE_CLOUD_PROJECT_NUMBER = process.env.EXPO_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER || '';
 export const DEVICE_ID_KEY = 'opspro.device-id';
 export const INSTALL_SECRET_KEY = 'opspro.install-secret';
+/**
+ * iOS only. The identifier of the Secure Enclave key Apple attested at setup; the
+ * key itself never leaves the enclave. Without this, a punch cannot be signed, so
+ * it is part of the credential and is cleared with it.
+ */
+export const APP_ATTEST_KEY_ID_KEY = 'opspro.app-attest-key-id';
 
 export async function sha256(value: string) {
   return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, value);
@@ -44,6 +50,20 @@ export function formatEnrollmentCode(value: string) {
 
 export function encodeAndroidEnrollmentPayload(input: { codeSha256: string; installIdHash: string; deviceLabel: string }) {
   return JSON.stringify([1, 'android_enrollment', input.codeSha256, input.installIdHash, input.deviceLabel]);
+}
+
+/**
+ * The iOS twin, and the string App Attest signs at setup.
+ *
+ * Must match encodeIosEnrollmentPayload on the server byte for byte -- the server
+ * rebuilds this string and hashes it to check Apple's nonce, so a stray space or a
+ * reordered field fails setup with no useful message.
+ *
+ * The tag differs from the Android one so a payload can never be replayed across
+ * platforms.
+ */
+export function encodeIosEnrollmentPayload(input: { codeSha256: string; installIdHash: string; deviceLabel: string }) {
+  return JSON.stringify([1, 'ios_enrollment', input.codeSha256, input.installIdHash, input.deviceLabel]);
 }
 
 /**
@@ -277,8 +297,38 @@ export async function requireInstallSecret(): Promise<string> {
  * whose every request then fails.
  */
 export async function clearEnrolment(): Promise<boolean> {
-  const results = await Promise.all([clearKey(INSTALL_SECRET_KEY), clearKey(DEVICE_ID_KEY)]);
+  // The App Attest key id goes with the rest. Leaving it behind would make the next
+  // setup try to reuse a key the server has already registered, and the server holds
+  // a unique index on the attested public key across every device row ever created
+  // -- including revoked ones -- so that attempt could never succeed.
+  const results = await Promise.all([
+    clearKey(INSTALL_SECRET_KEY),
+    clearKey(DEVICE_ID_KEY),
+    clearKey(APP_ATTEST_KEY_ID_KEY),
+  ]);
   return results.every(Boolean);
+}
+
+/**
+ * The stored App Attest key id, or null.
+ *
+ * Null is normal on Android and never an error there. On iOS it means the
+ * credential is incomplete and setup has to be repeated.
+ */
+export async function readAppAttestKeyId(): Promise<string | null> {
+  try {
+    const value = await SecureStore.getItemAsync(APP_ATTEST_KEY_ID_KEY);
+    return value ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stores the App Attest key id after a successful setup. */
+export async function writeAppAttestKeyId(keyId: string): Promise<void> {
+  await SecureStore.setItemAsync(APP_ATTEST_KEY_ID_KEY, keyId, {
+    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
 }
 
 /**

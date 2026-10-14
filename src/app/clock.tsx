@@ -27,7 +27,14 @@ type Session = {
   action: 'clock_in' | 'clock_out';
   clocked_in_at: string | null;
   locations: Array<Store & { id: string; shift_start: string; shift_end: string }>;
-  break?: { on_break: boolean; break_used: boolean; started_at: string | null; ended_at: string | null } | null;
+  // break_ms / ends_at / remaining_ms are sent by the server and say how long
+  // THIS shift's break is -- it belongs to the shift type and is no longer a
+  // fixed hour. Optional so an older API still works (ShiftProgress falls back).
+  break?: {
+    on_break: boolean; break_used: boolean;
+    started_at: string | null; ended_at: string | null;
+    break_ms?: number | null; ends_at?: string | null; remaining_ms?: number | null;
+  } | null;
   done_today?: { clock_in: string; clock_out: string } | null;
   next_shift?: (Store & { date: string; start: string; end: string }) | null;
 };
@@ -255,6 +262,8 @@ export default function ClockScreen() {
             shiftStart={location?.shift_start}
             shiftEnd={location?.shift_end}
             breakStartedAt={onBreak ? session.break?.started_at : null}
+            breakEndsAt={onBreak ? session.break?.ends_at ?? null : null}
+            breakMs={onBreak ? session.break?.break_ms ?? null : null}
           />
         )}
 

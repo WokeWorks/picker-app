@@ -4,7 +4,14 @@ import { StyleSheet, Text, View } from 'react-native';
 import { C } from '@/theme';
 
 const DUBAI_OFFSET_MS = 4 * 3_600_000;
-const BREAK_MS = 3_600_000; // one hour, same as the server (src/lib/break.ts)
+// The break length used when the server has not told us one -- an older API, or
+// a response that predates per-organisation breaks. NOT "the" break length: that
+// belongs to the shift's TYPE and arrives as break.break_ms from /api/mobile/session.
+//
+// This used to be a plain constant, and that was a real bug: a picker rostered
+// on a 30-minute break watched this count down from 60 while the server ended
+// their break at 30. They come back half an hour late, trusting the screen.
+const FALLBACK_BREAK_MS = 3_600_000;
 
 // "4:14 PM" in Dubai time.
 export function clockTime(ms: number) {
@@ -39,17 +46,26 @@ function useNow() {
 // Live panel while the picker is on shift: time worked so far, clock-in and
 // rostered end, and progress towards the end. On a break it switches to the
 // break countdown instead.
-export function ShiftProgress({ clockedInAt, shiftStart, shiftEnd, breakStartedAt }: {
+export function ShiftProgress({ clockedInAt, shiftStart, shiftEnd, breakStartedAt, breakEndsAt, breakMs }: {
   clockedInAt: string;
   shiftStart?: string;
   shiftEnd?: string;
   breakStartedAt?: string | null; // set only while ON a break
+  breakEndsAt?: string | null;    // when this break ends, from the server
+  breakMs?: number | null;        // how long this shift's break is, from the server
 }) {
   const now = useNow();
 
   if (breakStartedAt) {
     const startMs = Date.parse(breakStartedAt);
-    const endMs = startMs + BREAK_MS;
+    // The server's own numbers, in order of how little arithmetic they need:
+    // the instant it ends, then its length, then the old assumption. The first
+    // two come from the shift's TYPE; only the last is a guess.
+    const lengthMs = typeof breakMs === 'number' && breakMs > 0 ? breakMs : FALLBACK_BREAK_MS;
+    const endMs = breakEndsAt ? Date.parse(breakEndsAt) : startMs + lengthMs;
+    // Measured from the real end, so the bar and the countdown agree even when
+    // the server's length and ends_at disagree with each other.
+    const spanMs = Math.max(1, endMs - startMs);
     const left = Math.max(0, endMs - now);
     return (
       <View style={[styles.panel, styles.breakPanel]} accessibilityLabel={`On break, ${duration(left)} left`}>
@@ -60,7 +76,7 @@ export function ShiftProgress({ clockedInAt, shiftStart, shiftEnd, breakStartedA
         <Text style={[styles.big, styles.onOrange]}>{duration(left)} <Text style={styles.bigUnit}>left</Text></Text>
         <Text style={[styles.meta, styles.onOrange]}>Back by {clockTime(endMs)}  ·  Started {clockTime(startMs)}</Text>
         <View style={[styles.track, { backgroundColor: 'rgba(36,31,30,0.18)' }]}>
-          <View style={[styles.fill, { width: `${Math.max(2, Math.min(1, (now - startMs) / BREAK_MS) * 100)}%`, backgroundColor: C.onOrange }]} />
+          <View style={[styles.fill, { width: `${Math.max(2, Math.min(1, (now - startMs) / spanMs) * 100)}%`, backgroundColor: C.onOrange }]} />
         </View>
       </View>
     );

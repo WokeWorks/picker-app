@@ -27,7 +27,18 @@ export function demoSession(state: DemoState) {
     locations: state === 'none' || state === 'done' ? [] : [store],
     break: onShift
       ? state === 'break'
-        ? { on_break: true, break_used: true, started_at: new Date(now - 18 * MIN).toISOString(), ended_at: null }
+        // A 30-MINUTE break on purpose, with the fields the real server sends.
+        // Demo mode is where the break panel gets looked at, and a demo that
+        // omitted break_ms would exercise only the one-hour fallback -- so the
+        // screen would look right while the thing being demonstrated was not.
+        ? {
+            on_break: true, break_used: true,
+            started_at: new Date(now - 18 * MIN).toISOString(),
+            ended_at: null,
+            break_ms: 30 * MIN,
+            ends_at: new Date(now - 18 * MIN + 30 * MIN).toISOString(),
+            remaining_ms: 12 * MIN,
+          }
         : { on_break: false, break_used: false, started_at: null, ended_at: null }
       : null,
     done_today: state === 'done'
